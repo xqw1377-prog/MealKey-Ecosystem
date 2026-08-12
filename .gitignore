@@ -1,0 +1,19 @@
+.env
+.env.local
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+*.db
+.DS_Store
+data/
+# IDE
+.vscode/
+.idea/
+# Logs
+*.log
+# Temp
+*.tmp
+SYNC_MARKER.txt

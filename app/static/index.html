@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MealKey 餐启｜外卖智慧经营</title>
+    <link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/mk-home.css" />
+    <link rel="stylesheet" href="/static/mk-home-v2.css" />
+  </head>
+  <body class="view-home">
+    <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
+    <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+    <div class="dashboard-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand-block">
+          <img class="brand-mark" src="/static/brand/mealkey-mark.svg" width="32" height="32" alt="MealKey 餐启" />
+          <div>
+            <div class="brand-name">MealKey <span>餐启</span></div>
+            <div class="brand-subtitle">外卖智慧经营</div>
+          </div>
+        </div>
+
+        <div class="store-profile-card" id="storeProfileCard">
+          <strong id="sidebarStoreName">门店加载中</strong>
+          <span id="sidebarStoreMeta">平台连接后显示经营状态</span>
+          <div class="store-profile-tags">
+            <span id="sidebarPlatformTag">美团外卖</span>
+            <span class="is-open" id="sidebarOpenTag">营业中</span>
+          </div>
+        </div>
+
+        <nav class="side-nav" id="sideNav">
+          <button class="nav-item active" type="button" data-scroll-target="section-overview" data-nav-key="today">
+            <span class="nav-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 9 10 3.8 16.5 9v7.2H12v-4H8v4H3.5Z"/></svg></span>
+            <span class="nav-content">
+              <span class="nav-title">今天</span>
+              <span class="nav-copy">先看 AI 判断，再决定要不要介入</span>
+            </span>
+          </button>
+
+          <button class="nav-item" type="button" data-scroll-target="section-ai" data-nav-key="do">
+            <span class="nav-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5c.5 4 1.6 5.1 5.5 5.5-3.9.5-5 1.6-5.5 5.5C9.5 9.6 8.4 8.5 4.5 8 8.4 7.5 9.5 6.4 10 2.5Z"/><path d="M15.5 12.5c.2 1.7.8 2.3 2.5 2.5-1.7.2-2.3.8-2.5 2.5-.2-1.7-.8-2.3-2.5-2.5 1.7-.2 2.3-.8 2.5-2.5Z"/></svg></span>
+            <span class="nav-content">
+              <span class="nav-title">做事</span>
+              <span class="nav-copy">直接说目标，不用自己找功能</span>
+            </span>
+          </button>
+
+          <button class="nav-item" type="button" data-scroll-target="section-record" data-nav-key="record">
+            <span class="nav-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4Zm3 3h6M7 10h6M7 13h4"/></svg></span>
+            <span class="nav-content">
+              <span class="nav-title">记录</span>
+              <span class="nav-copy" id="navActionCopy">做过 · 正在做 · 验证结果</span>
+            </span>
+          </button>
+
+          <div class="nav-group nav-group-secondary" data-nav-group="skills">
+            <button class="nav-item nav-group-toggle" type="button" data-scroll-target="section-settings" data-nav-key="skills" data-nav-toggle="skills" aria-expanded="false">
+              <span class="nav-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z"/><path d="M3.5 10h2M14.5 10h2M10 3.5v2M10 14.5v2"/></svg></span>
+              <span class="nav-content">
+                <span class="nav-title">能力与设置</span>
+                <span class="nav-copy">平时收起，有需要再展开</span>
+              </span>
+              <span class="nav-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="nav-sub" id="navSubSkills" hidden>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-diagnosis">经营诊断</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-product">商品</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-ads">投流</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-crm">用户</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-review">评价</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-competition-agent">竞争</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-promo">活动</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-collection">平台连接</button>
+              <button class="nav-sub-item" type="button" data-scroll-target="section-settings">店铺设置</button>
+            </div>
+          </div>
+        </nav>
+
+        <div class="sidebar-section">
+          <div class="sidebar-label">店铺切换</div>
+          <select id="storeSelect" class="sidebar-select"></select>
+          <button id="bootstrapBtn" class="sidebar-link">+ 添加门店</button>
+        </div>
+
+        <div class="sidebar-guide">
+          <div class="guide-head">
+            <span>新手引导</span>
+            <span id="guideStep">已完成 0/4</span>
+          </div>
+          <div class="guide-progress">
+            <div class="guide-progress-bar" id="guideProgressBar"></div>
+          </div>
+          <p id="guideHint">先补齐资料，再执行今日动作。</p>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-owner">
+            <div class="profile-avatar" id="sidebarOwnerAvatar">店</div>
+            <div class="profile-meta">
+              <strong id="sidebarOwnerName">老板</strong>
+              <span id="profileStoreName">门店加载中</span>
+            </div>
+          </div>
+          <button class="sidebar-foot-link" id="openHelpBtn" type="button">不会用？让 AI 带我走一遍</button>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar module-topbar">
+          <div class="topbar-main">
+            <div class="topbar-eyebrow" id="topbarEyebrow">MealKey</div>
+            <h1 id="topbarTitle">当下经营状态</h1>
+            <p id="topbarSummary">AI 先看完经营状态，你只处理需要拍板的那件事</p>
+          </div>
+
+          <div class="topbar-actions">
+            <button class="topbar-button sidebar-toggle" id="sidebarToggle" aria-label="切换侧栏" aria-expanded="true" aria-controls="sidebar">菜单</button>
+            <div class="topbar-chip" id="currentDate">今天</div>
+            <button class="topbar-button" id="refreshBtn">刷新</button>
+            <button class="topbar-button" id="toggleRightRailBtn" type="button" aria-pressed="false">情报</button>
+            <button class="topbar-button primary" id="chatQuickBtn" type="button">告诉 AI</button>
+          </div>
+        </header>
+
+        <div class="content-grid">
+          <main class="main-column" id="mainColumn">
+            <div class="home-shell mk-home" id="homeShell">
+            <!-- 通栏顶栏：对齐主仓 -->
+            <header class="mk-appbar" id="mkAppBar">
+              <button class="mk-appbar-brand" id="mkWorkRailToggleBtn" type="button" title="收起/展开左侧工作线程" aria-expanded="true" aria-controls="mkWorkRail">
+                <img class="mk-appbar-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+                <div>
+                  <strong>MealKey</strong>
+                  <span>AI 店长 · 外卖智慧经营</span>
+                </div>
+              </button>
+              <div class="mk-appbar-store">
+                <strong id="focusStoreName">门店加载中</strong>
+                <span class="mk-open-dot" id="focusOpenDot">营业中</span>
+                <em id="sectionRefreshMeta">更新于 --</em>
+              </div>
+              <div class="mk-appbar-actions">
+                <button class="mk-icon-btn" id="mkNotifyBtn" type="button" aria-label="提醒" title="提醒">
+                  <span class="mk-badge" id="mkNeedBadge" hidden>0</span>
+                  <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 2.5a3.2 3.2 0 0 0-3.2 3.2v1.1c0 1.3-.4 2.5-1.2 3.5l-.7.9a1.2 1.2 0 0 0 1 1.8h8.2a1.2 1.2 0 0 0 1-1.8l-.7-.9a5.8 5.8 0 0 1-1.2-3.5V5.7A3.2 3.2 0 0 0 10 2.5Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8.2 16.2a1.8 1.8 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                </button>
+                <button class="mk-profile-chip" id="mkOwnerAvatar" type="button" title="修改个人信息" aria-label="修改个人信息">
+                  <span class="mk-avatar" id="mkOwnerAvatarFace">王</span>
+                  <span class="mk-owner-name" id="mkOwnerName">老板</span>
+                  <span class="mk-profile-caret" aria-hidden="true">▾</span>
+                </button>
+              </div>
+            </header>
+
+            <div class="mk-home-body" id="mkHomeBody">
+            <!-- 10% 左：工作流动态 -->
+            <aside class="mk-work-rail" id="mkWorkRail" aria-label="工作流动态">
+              <div class="mk-work-rail-loading">工作流加载中…</div>
+            </aside>
+
+            <!-- 70% 中：决策对话 -->
+            <section class="mk-home-main mk-home-section" id="section-overview">
+              <div class="mk-chat-stage" id="mkChatStage">
+                <div class="mk-guide-area" id="mkGuideArea" aria-live="polite">
+                  <div class="mk-safe-mode-banner" id="mkSafeModeBanner" style="display:none;padding:8px 12px;margin-bottom:8px;border-radius:8px;background:rgba(232,162,0,0.1);border:1px solid rgba(232,162,0,0.3);font-size:13px;line-height:1.6;"></div>
+                  <div class="mk-guide-progress" id="mkGuideProgress" hidden></div>
+                  <div class="mk-guide-body" id="mkDecisionHost"></div>
+                </div>
+                <div class="mk-chat-thread" id="homeChatThread" aria-live="polite"></div>
+                <!-- AI 任务专属视图：只显示当前这一件事的流程，不加载全量看板 -->
+                <div class="mk-task-view" id="mkTaskView" hidden>
+                  <div class="mk-task-header">
+                    <button class="mk-task-back" type="button" data-task-back>← 返回首页</button>
+                    <h3 id="mkTaskTitle"></h3>
+                  </div>
+                  <div class="mk-task-body" id="mkTaskBody"></div>
+                </div>
+                <p class="mk-analyzing" id="mkAnalyzingLine" hidden>MealKey 正在分析中… 预计 1–2 分钟</p>
+              </div>
+
+              <!-- 兼容旧节点（隐藏） -->
+              <div class="mk-status-line" id="mkBanner" hidden>
+                <p id="focusStatusLine"></p>
+                <small id="focusStatusSub"></small>
+                <button type="button" id="mkDailyBriefBtn" hidden>证据</button>
+              </div>
+              <div class="focus-stage" id="focusStage" hidden></div>
+              <details class="goal-evidence-details focus-evidence" id="mkEvidenceDetails" hidden>
+                <summary>细节</summary>
+                <div id="goalEvidencePulse">
+                  <strong id="healthScore" hidden>--</strong>
+                  <span id="storePulseStatus" hidden></span>
+                  <div id="storePulseMetrics" hidden></div>
+                  <p id="healthCaption" hidden></p>
+                  <div id="storePulseEvidence" hidden></div>
+                  <aside id="storePulseSide" hidden></aside>
+                </div>
+                <div id="storePulseShare" hidden></div>
+                <div id="todayMainlineFlow" hidden></div>
+                <span id="storePulseConfidence" hidden></span>
+              </details>
+              <span id="greetingText" hidden></span>
+              <h1 id="greetingTitle" hidden></h1>
+              <p id="greetingStore" hidden></p>
+              <p id="opsPrinciple" hidden></p>
+              <div id="opsQueue" hidden></div>
+              <span id="alignmentFoot" hidden></span>
+              <span id="openEventCount" hidden>0</span>
+              <span id="managerSideSignals" hidden></span>
+              <div id="managerNarrative" hidden></div>
+              <div id="trendChart" hidden></div>
+              <div id="trendAxis" hidden></div>
+              <div id="mainlineMeta" hidden></div>
+              <div id="worthDoingTitle" hidden></div>
+              <div id="worthDoingList" hidden></div>
+              <div id="goalPrimaryCard" hidden></div>
+              <div id="goalPrimaryTitle" hidden></div>
+              <div id="goalPrimaryReason" hidden></div>
+              <div id="goalPrimaryMeta" hidden></div>
+              <div id="goalPrimaryActions" hidden></div>
+              <div id="goalSecondaryCard" hidden></div>
+              <div id="goalSecondaryTitle" hidden></div>
+              <div id="goalSecondaryReason" hidden></div>
+              <div id="goalBackgroundBar" hidden></div>
+
+              <div class="home-chat-dock command-bar slim" id="homeChatDock">
+                <div class="command-bar-titles" hidden>
+                  <strong>告诉 MealKey 你想做什么</strong>
+                  <span hidden></span>
+                </div>
+                <div class="home-chat-reply" id="homeChatReply" hidden></div>
+                <div class="command-bar-drop-hint" id="commandBarDropHint" hidden>
+                  <strong>把文件拖到这里</strong>
+                  <span>支持图片、文档、表格，松手后我会直接读。</span>
+                </div>
+                <div class="command-bar-input-row">
+                  <button class="command-bar-icon" type="button" id="commandBarAttachBtn" aria-label="上传资料" title="上传资料">
+                    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M7.2 10.8 11.9 6a2.6 2.6 0 1 1 3.7 3.7l-6.3 6.3a4 4 0 1 1-5.7-5.7l7.2-7.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <input
+                    id="homeChatInput"
+                    type="text"
+                    placeholder="直接告诉 MealKey 你的目标、问题，或把资料发给我"
+                    autocomplete="off"
+                  />
+                  <button class="command-bar-icon" type="button" id="commandBarMicBtn" aria-label="实时语音输入" title="浏览器实时语音">
+                    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="7.5" y="2.5" width="5" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </button>
+                  <button class="command-bar-send" id="homeChatSendBtn" type="button" aria-label="发送">
+                    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3.2 10.2 16.5 3.8l-4.2 12.5-2.4-4.7-4.7-1.4Z" fill="currentColor"/></svg>
+                  </button>
+                </div>
+                <div class="command-bar-tools" id="commandBarTools">
+                  <button type="button" class="command-bar-tool" id="commandBarLiveVoiceBtn">实时说一句</button>
+                  <button type="button" class="command-bar-tool" id="commandBarAudioToolBtn">上传音频转写</button>
+                </div>
+                <p class="command-bar-attach-hint" hidden>支持图片 / 文档 / 表格，MealKey 会自己读</p>
+                <div class="command-bar-chips" id="commandBarChips">
+                  <button type="button" data-assist-prompt="这个月做到20万营业额">这个月做到20万</button>
+                  <button type="button" data-assist-prompt="利润太低了，先帮我找原因和动作">利润太低了</button>
+                  <button type="button" data-assist-prompt="把牛肉饭做到附近前三">牛肉饭做到前三</button>
+                </div>
+                <div class="command-bar-attachments" id="commandBarAttachments" hidden></div>
+                <div class="command-bar-chips more" id="commandBarMoreChips" hidden></div>
+                <button type="button" class="chip-more" id="commandBarMoreBtn" hidden aria-expanded="false">更多 ▾</button>
+                <button type="button" class="command-bar-examples" id="commandBarExamplesBtn" hidden>示例问题 ›</button>
+                <input id="commandBarFileInput" type="file" multiple hidden />
+                <input id="commandBarAudioInput" type="file" accept="audio/*" multiple hidden />
+                <button type="button" class="mk-expert-mode" id="mkExpertModeBtn" data-scroll-target="section-settings">⚙ 专家模式</button>
+              </div>
+            </section>
+
+            <!-- 20% 右：经营语境 -->
+            <aside class="mk-context-rail" id="mkContextRail" aria-label="MealKey 今日经营流">
+              <div class="mk-context-loading">经营流加载中…</div>
+            </aside>
+            </div>
+
+            <section class="dashboard-section home-anchor-section" id="section-today-mainline" hidden></section>
+            <section class="dashboard-section home-anchor-section" id="section-worth-doing" hidden></section>
+            <section class="dashboard-section home-anchor-section" id="section-auto-activity" hidden>
+              <div class="auto-activity-list" id="autoActivityList"></div>
+            </section>
+            <section class="dashboard-section home-anchor-section" id="section-verified-wins" hidden>
+              <div class="section-meta" id="verifiedWinsMeta">0 条</div>
+              <div class="verified-wins-list" id="verifiedWinsList"></div>
+            </section>
+            <section class="dashboard-section home-anchor-section" id="section-events" hidden>
+              <div class="section-meta" id="eventSectionMeta">待刷新</div>
+              <div class="event-digest" id="eventDigest"></div>
+            </section>
+            <section class="dashboard-section home-anchor-section" id="section-actions" hidden>
+              <div class="section-meta" id="actionSummaryMeta">待刷新</div>
+              <div class="action-list" id="actionCenter"></div>
+              <div class="action-table-foot" id="actionTableFoot"></div>
+            </section>
+            </div>
+
+            <section class="dashboard-section workspace-deck" id="section-workspace-deck">
+              <div class="workspace-deck-head">
+                <div class="workspace-deck-title">
+                  <button class="workspace-back-home" id="backHomeBtn" type="button" data-scroll-target="section-overview" hidden>
+                    ← 返回今日
+                  </button>
+                  <div class="section-kicker" id="workspaceLabel">今日工作台</div>
+                  <h2 id="workspaceHeading">先看 AI 店长判断，再做一件事</h2>
+                  <p id="workspaceSummary">只打开一个模块，把今天最该做的那件事做完。</p>
+                </div>
+                <div class="section-meta workspace-meta" id="workspaceMeta">当前工作区：今日</div>
+              </div>
+
+              <div class="workspace-stage" id="workspaceStage">
+            <section class="dashboard-section workspace-panel workspace-home-panel active" id="section-home" data-workspace-panel="section-home">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">今日工作台</div>
+                  <h2>返回今日晨报继续决策</h2>
+                  <p>模块详情已收进侧栏「经营 / 行动 / 门店」。日常请从今日主线处理异常与实验。</p>
+                </div>
+              </div>
+              <div class="home-deep-actions">
+                <button class="action-button primary" type="button" data-scroll-target="section-overview">回到今日</button>
+                <button class="action-button" type="button" data-scroll-target="section-diagnosis">经营主线</button>
+                <button class="action-button" type="button" data-scroll-target="section-matrix">执行任务</button>
+              </div>
+            </section>
+
+            <section class="dashboard-section competition-agent-section workspace-panel" id="section-competition-agent" data-workspace-panel="section-competition-agent">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">商圈 Agent</div>
+                  <h2>商圈竞争工作台</h2>
+                  <p>盯住周边谁在抢单、怎么变，再决定这边要不要跟。</p>
+                </div>
+                <button class="topbar-button primary" id="scanCompetitionWorkbenchBtn">更新商圈快照</button>
+              </div>
+              <div class="competition-agent-hero">
+                <div class="competition-score-card">
+                  <span>商圈竞争分</span>
+                  <strong id="competitionAgentScore">--</strong>
+                  <small>/ 100</small>
+                </div>
+                <div class="competition-conclusion-card">
+                  <div class="competition-agent-meta">
+                    <span id="competitionReadiness">数据准备度 --</span>
+                    <span id="competitionBenchmark">基准组 --</span>
+                  </div>
+                  <h3 id="competitionAgentConclusion">正在建立商圈竞争判断…</h3>
+                  <p id="competitionExpectedImpact">等待预期影响判断。</p>
+                  <div class="competition-focus-list" id="competitionFocusList"></div>
+                </div>
+              </div>
+              <div class="competition-agent-grid">
+                <div class="competition-agent-panel">
+                  <div class="product-panel-title">重点竞品</div>
+                  <div class="competition-agent-list" id="competitionAgentList"></div>
+                </div>
+                <div class="competition-agent-panel">
+                  <div class="product-panel-title">最近变化</div>
+                  <div class="competition-change-grid" id="competitionChangeGrid"></div>
+                </div>
+              </div>
+              <div class="competition-agent-grid">
+                <div class="competition-agent-panel">
+                  <div class="product-panel-title">威胁与证据</div>
+                  <div class="agent-bullet-list" id="competitionThreatList"></div>
+                </div>
+                <div class="competition-agent-panel">
+                  <div class="product-panel-title">建议动作</div>
+                  <div class="agent-action-list" id="competitionActionList"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="dashboard-section menu-agent-section workspace-panel" id="section-menu" data-workspace-panel="section-menu">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">菜单 Agent</div>
+                  <h2>菜单结构工作台</h2>
+                  <p>看菜单缺什么、该补什么、谁该先下，让菜单更好卖也更好管。</p>
+                </div>
+                <div class="menu-health-tag" id="menuHealthTag">菜单健康度 --</div>
+                <button class="ghost-btn" id="menuDiagnosisBtn" data-menu-diagnosis style="display:none;margin-left:8px;padding:4px 12px;font-size:12px;border-radius:6px;">深度诊断（12引擎）</button>
+              </div>
+              <div class="menu-agent-hero">
+                <div class="menu-summary-card">
+                  <span>当前判断</span>
+                  <h3 id="menuWorkflowSummary">正在分析菜单结构…</h3>
+                  <div class="menu-role-grid" id="menuRoleGrid"></div>
+                </div>
+                <div class="menu-pricing-card">
+                  <div class="product-panel-title">价格梯度</div>
+                  <div class="menu-price-range" id="menuPriceRange">¥-- 至 ¥--</div>
+                  <div class="menu-price-bands" id="menuPriceBands"></div>
+                  <p id="menuPriceGap">等待价格带判断。</p>
+                </div>
+              </div>
+              <div class="menu-agent-grid">
+                <div class="menu-agent-panel">
+                  <div class="menu-panel-head">
+                    <div class="product-panel-title">商品角色分工</div>
+                    <span id="menuItemCount">0 个商品</span>
+                  </div>
+                  <div class="menu-item-list" id="menuItemList"></div>
+                </div>
+                <div class="menu-agent-panel">
+                  <div class="product-panel-title">结构缺口与依据</div>
+                  <div class="agent-bullet-list" id="menuGapList"></div>
+                </div>
+              </div>
+              <div class="menu-action-columns">
+                <div class="menu-action-panel">
+                  <div class="product-panel-title">补齐菜单缺口</div>
+                  <div id="menuPatchList"></div>
+                </div>
+                <div class="menu-action-panel">
+                  <div class="product-panel-title">套餐机会</div>
+                  <div id="menuBundleList"></div>
+                </div>
+                <div class="menu-action-panel">
+                  <div class="product-panel-title">低效商品清理</div>
+                  <div id="menuCleanupList"></div>
+                </div>
+              </div>
+              <div class="menu-deep-diagnosis">
+                <div class="menu-panel-head">
+                  <div class="product-panel-title">12 引擎深度诊断</div>
+                  <button type="button" id="runMenuDiagnosisBtn">深度诊断</button>
+                </div>
+                <p class="menu-dx-hint">运行菜单经营诊断引擎，输出结构/定价/角色等 findings。</p>
+                <div id="menuDeepDiagnosisResult" class="menu-deep-diagnosis-result"></div>
+              </div>
+            </section>
+
+            <section class="dashboard-section product-agent-section workspace-panel" id="section-product" data-workspace-panel="section-product">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">商品 Agent</div>
+                  <h2>商品优化工作台</h2>
+                  <p>找出主推商品卡在哪，再给一条先做、好回退的动作。</p>
+                </div>
+                <div class="product-health-tag" id="productHealthTag">健康度 --</div>
+              </div>
+              <div class="product-agent-grid">
+                <div class="product-focus-card" id="productFocusCard"></div>
+                <div class="product-dimension-panel">
+                  <div class="product-panel-title">商品健康度拆解</div>
+                  <div class="product-dimension-list" id="productDimensionList"></div>
+                </div>
+                <div class="product-diagnosis-panel" id="productDiagnosisPanel"></div>
+              </div>
+              <div class="product-recommendation-head">
+                <div>
+                  <div class="product-panel-title">候选商品池</div>
+                  <p id="productCurrentAction">当前没有进行中的商品动作。</p>
+                </div>
+                <div class="section-meta" id="productCandidateMeta">待分析商品 --</div>
+              </div>
+              <div class="product-candidate-grid" id="productCandidateGrid"></div>
+              <div class="product-recommendation-head">
+                <div>
+                  <div class="product-panel-title">单变量优化方案</div>
+                  <p id="productGuardrail">一次只执行一个商品动作。</p>
+                </div>
+              </div>
+              <div class="product-recommendation-grid" id="productRecommendationGrid"></div>
+            </section>
+
+            <section class="dashboard-section storefront-agent-section workspace-panel" id="section-storefront" data-workspace-panel="section-storefront">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">线上装修 Agent</div>
+                  <h2>门店线上装修诊断</h2>
+                  <p>店页第一眼、招牌、分类、套餐与评分区，直接决定点击和转化；AI 可协助装修方案与主图优化。</p>
+                </div>
+                <div class="settings-head-actions">
+                  <button class="topbar-button" id="aiStorefrontDecorateBtn">AI 协助装修</button>
+                  <button class="topbar-button primary" id="aiStorefrontImageBtn">AI 优化主图</button>
+                  <div class="product-health-tag" id="storefrontHealthTag">装修健康度 --</div>
+                </div>
+              </div>
+              <div class="storefront-ai-panel" id="storefrontAiPanel" hidden>
+                <div class="storefront-ai-head">
+                  <strong id="storefrontAiTitle">AI 协助结果</strong>
+                  <div class="settings-head-actions">
+                    <button class="link-button" id="copyStorefrontAiBtn" type="button">复制方案</button>
+                    <button class="link-button" id="closeStorefrontAiBtn" type="button">收起</button>
+                  </div>
+                </div>
+                <div id="storefrontAiBody"></div>
+              </div>
+              <div class="storefront-hero">
+                <div class="storefront-score-card">
+                  <div class="section-kicker">装修健康分</div>
+                  <div class="storefront-score-value" id="storefrontScore">--</div>
+                  <p id="storefrontConclusion">正在诊断店页装修…</p>
+                  <div class="storefront-impact" id="storefrontImpact">预计销售影响评估中</div>
+                </div>
+                <div class="storefront-dimension-panel">
+                  <div class="product-panel-title">五维拆解</div>
+                  <div class="storefront-dimension-list" id="storefrontDimensionList"></div>
+                </div>
+              </div>
+              <div class="storefront-issue-panel">
+                <div class="product-panel-title">销售敏感问题</div>
+                <div id="storefrontIssueList"></div>
+              </div>
+              <div class="product-recommendation-head">
+                <div>
+                  <div class="product-panel-title">优先改造动作</div>
+                  <p id="storefrontCurrentAction">先修对 CTR/CVR 杠杆最大的一项。</p>
+                </div>
+                <div class="section-meta" id="storefrontReadiness">准备度 --</div>
+              </div>
+              <div class="storefront-action-grid" id="storefrontActionGrid"></div>
+            </section>
+
+            <section class="dashboard-section diagnosis-agent-section workspace-panel" id="section-diagnosis" data-workspace-panel="section-diagnosis">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">每日诊断 Agent</div>
+                  <h2>经营诊断工作台</h2>
+                  <p>把最近数据讲明白：哪里变了、为什么变、下一步先做什么。</p>
+                </div>
+                <button class="topbar-button primary" id="runDiagnosisBtn">重新诊断</button>
+              </div>
+              <div class="diagnosis-hero">
+                <div class="diagnosis-score-card">
+                  <span>经营诊断分</span>
+                  <strong id="diagnosisScore">--</strong>
+                  <small>分</small>
+                </div>
+                <div class="diagnosis-summary-card">
+                  <span>今日结论</span>
+                  <h3 id="diagnosisSummary">正在生成经营诊断…</h3>
+                  <p id="diagnosisDailySummary">等待多周期指标对比。</p>
+                </div>
+              </div>
+              <div class="diagnosis-ohre-grid">
+                <div class="diagnosis-panel">
+                  <div class="product-panel-title">Observation · 发生了什么</div>
+                  <div class="diagnosis-observation-list" id="diagnosisObservationList"></div>
+                </div>
+                <div class="diagnosis-panel">
+                  <div class="product-panel-title">Hypothesis · 为什么</div>
+                  <div class="diagnosis-hypothesis-card" id="diagnosisHypothesisCard"></div>
+                </div>
+              </div>
+              <div class="diagnosis-subhead">
+                <div>
+                  <div class="product-panel-title">周期对比</div>
+                  <p>看昨天、近 7 天、近 30 天，避免只盯一天。</p>
+                </div>
+              </div>
+              <div class="diagnosis-comparison-grid" id="diagnosisComparisonGrid"></div>
+              <div class="diagnosis-detail-grid">
+                <div class="diagnosis-panel">
+                  <div class="product-panel-title">指标异常雷达</div>
+                  <div class="diagnosis-signal-list" id="diagnosisSignalList"></div>
+                </div>
+                <div class="diagnosis-panel">
+                  <div class="product-panel-title">根因优先级</div>
+                  <div class="diagnosis-root-list" id="diagnosisRootList"></div>
+                </div>
+              </div>
+              <div class="diagnosis-evidence-grid">
+                <div class="diagnosis-evidence-card" id="diagnosisMarketCard"></div>
+                <div class="diagnosis-evidence-card">
+                  <div class="product-panel-title">当前数据缺口</div>
+                  <div class="diagnosis-gap-list" id="diagnosisGapList"></div>
+                </div>
+              </div>
+              <div class="diagnosis-next-card">
+                <div class="product-panel-title">下一步动作优先级</div>
+                <div class="agent-action-list" id="diagnosisNextActions"></div>
+              </div>
+            </section>
+
+            <section class="dashboard-section growth-agent-section workspace-panel" id="section-growth" data-workspace-panel="section-growth">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">增长策略 Agent</div>
+                  <h2>增长策略工作台</h2>
+                  <p>把核心 Agent 与运营矩阵的建议排顺序，只保留今天最该做的一件事。</p>
+                </div>
+                <button class="topbar-button primary" id="rebuildGrowthBtn">重新排优先级</button>
+              </div>
+              <div class="growth-hero">
+                <div class="growth-score-card">
+                  <span>策略机会分</span>
+                  <strong id="growthStrategyScore">--</strong>
+                  <small>/ 100</small>
+                </div>
+                <div class="growth-priority-card">
+                  <span>今日唯一主动作</span>
+                  <h3 id="growthTodayPriority">正在选择最高价值动作…</h3>
+                  <p id="growthReason">等待核心 Agent 与运营矩阵汇总。</p>
+                  <div class="growth-priority-meta">
+                    <span id="growthWeeklyGoal">本周目标 --</span>
+                    <span id="growthExecutionMode">实验模式</span>
+                  </div>
+                </div>
+              </div>
+              <div class="growth-status-row">
+                <div class="growth-current-card" id="growthCurrentActionCard"></div>
+                <div class="growth-experiment-summary" id="growthExperimentSummary"></div>
+              </div>
+              <div class="growth-section-head">
+                <div>
+                  <div class="product-panel-title">经营经验（Strategy Memory）</div>
+                  <p id="growthLearningNote">OHRE 的 Result 会沉淀成下次决策经验，避免重复买流水。</p>
+                </div>
+                <div class="section-meta" id="strategyMemoryMeta">0 条经验</div>
+              </div>
+              <div class="strategy-memory-grid" id="strategyMemoryGrid"></div>
+              <div class="growth-section-head">
+                <div>
+                  <div class="product-panel-title">跨 Agent 机会池</div>
+                  <p>先看值不值得做，再看好不好做、风不风险。</p>
+                </div>
+                <div class="section-meta" id="growthPoolMeta">0 个机会</div>
+              </div>
+              <div class="growth-opportunity-grid" id="growthOpportunityGrid"></div>
+              <div class="growth-section-head">
+                <div>
+                  <div class="product-panel-title">未来 7 天推进计划</div>
+                  <p>每天做什么、看到什么算过关，都写清楚。</p>
+                </div>
+                <div class="growth-progress-tag" id="growthProgressTag">已复盘 0%</div>
+              </div>
+              <div class="growth-plan-grid" id="growthPlanGrid"></div>
+              <div class="growth-guardrail-grid">
+                <div class="growth-evidence-card">
+                  <div class="product-panel-title">为什么是它</div>
+                  <div class="growth-evidence-list" id="growthEvidenceList"></div>
+                </div>
+                <div class="growth-stop-card">
+                  <div class="product-panel-title">本周不要做</div>
+                  <div class="growth-stop-list" id="growthStopList"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="dashboard-section workspace-panel" id="section-ai" data-workspace-panel="section-ai">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">做事</div>
+                  <h2>你想让 MealKey 帮你做到什么？</h2>
+                  <p>说目标，不说功能。店长会拆解并调度团队；你不用知道背后是哪个 Agent。</p>
+                </div>
+                <button class="link-button" id="askExamplesBtn">看看别人怎么说</button>
+              </div>
+              <div class="ai-assist-chips" id="aiAssistChips">
+                <button type="button" data-assist-prompt="这个月做到20万营业额">这个月做到20万</button>
+                <button type="button" data-assist-prompt="把利润率拉回18%">利润率拉回18%</button>
+                <button type="button" data-assist-prompt="把牛肉饭做到附近前三">牛肉饭做到前三</button>
+                <button type="button" data-assist-prompt="今天中午要不要加投流？">今天要不要加投？</button>
+              </div>
+              <div class="ai-chat-panel">
+                <div class="ai-chat-messages" id="aiChatMessages"></div>
+                <div class="ai-chat-composer">
+                  <input id="aiChatInput" type="text" placeholder="例如：这个月做到20万 / 牛肉饭做到附近前三 / 今天别烦我只盯利润" autocomplete="off" />
+                  <button class="topbar-button primary" id="aiChatSendBtn" type="button">交给 MealKey</button>
+                </div>
+              </div>
+              <details class="goal-evidence-details" style="margin-top:16px;">
+                <summary>需要时再看团队状态</summary>
+                <div class="agent-team-block">
+                  <div class="product-panel-title">13 Agent 运营团队</div>
+                  <p class="agent-team-hint">日常不必点这里；只在你想深入某条能力时再打开。</p>
+                  <div class="agent-team-roster" id="agentTeamRoster"></div>
+                </div>
+                <div class="insight-grid" id="insightTiles"></div>
+              </details>
+            </section>
+
+            <section class="dashboard-section workspace-panel" id="section-record" data-workspace-panel="section-record">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">记录</div>
+                  <h2>做过的事，现在有什么结果</h2>
+                  <p>MealKey 不只提建议，也会回来交代结果，并写入本店策略记忆。</p>
+                </div>
+              </div>
+              <div id="recordWorkspaceBody"></div>
+            </section>
+
+            <section class="dashboard-section settings-section workspace-panel" id="section-settings" data-workspace-panel="section-settings">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">系统设置</div>
+                  <h2>设置中心</h2>
+                  <p>完成门店基础数据、菜单、平台对接与系统密钥；AI 会按清单提示下一步。</p>
+                </div>
+                <div class="settings-head-actions">
+                  <button class="topbar-button" id="refreshSettingsBtn">刷新清单</button>
+                  <button class="topbar-button primary" id="demoConnectBtn">一键演示对接美团</button>
+                </div>
+              </div>
+
+              <div class="settings-checklist" id="settingsChecklist"></div>
+
+              <div class="settings-ai-panel">
+                <div class="settings-ai-copy">
+                  <strong id="settingsAssistTitle">AI 协助上手</strong>
+                  <p id="settingsAssistSummary">加载中…</p>
+                </div>
+                <div class="settings-ai-actions">
+                  <button class="topbar-button" id="assistDeployBtn">看部署步骤</button>
+                  <button class="topbar-button" id="assistPlatformBtn">看对接步骤</button>
+                </div>
+                <div class="settings-ai-steps" id="settingsAssistSteps"></div>
+              </div>
+
+              <div class="settings-llm-panel" id="settingsLlmPanel">
+                <div class="product-panel-title">内置大模型智能引擎（独立部署）</div>
+                <p class="settings-card-hint" id="settingsLlmHint">本系统自带引擎副本，不依赖主仓进程。</p>
+                <div class="settings-llm-grid" id="settingsLlmGrid"></div>
+              </div>
+
+              <div class="settings-grid">
+                <form class="settings-card" id="storeSettingsForm">
+                  <div class="product-panel-title">门店基础资料</div>
+                  <div class="settings-form-grid">
+                    <label>门店名称<input name="name" required /></label>
+                    <label>城市<input name="city" /></label>
+                    <label>商圈/区域<input name="area" /></label>
+                    <label>品类<input name="category" placeholder="如：快餐" /></label>
+                    <label>菜系<input name="cuisine_type" placeholder="如：盖饭" /></label>
+                    <label>营业时间<input name="business_hours" placeholder="10:00-21:00" /></label>
+                    <label>主客群<input name="audience" placeholder="如：写字楼" /></label>
+                    <label>主痛点<input name="pain" placeholder="如：订单下降" /></label>
+                    <label class="span-2">地址<input name="address" /></label>
+                    <label>纬度<input name="latitude" type="number" step="any" /></label>
+                    <label>经度<input name="longitude" type="number" step="any" /></label>
+                    <label>配送半径(米)<input name="delivery_radius_m" type="number" min="500" max="10000" /></label>
+                    <label>平台门店ID<input name="platform_store_key" /></label>
+                  </div>
+                  <button class="topbar-button primary" type="submit">保存门店资料</button>
+                </form>
+
+                <form class="settings-card" id="menuSettingsForm">
+                  <div class="product-panel-title">菜单基础数据</div>
+                  <p class="settings-card-hint">每行一个菜：名称|品类|价格。也可用上方「一键演示对接」自动导入。</p>
+                  <textarea id="menuSettingsText" rows="8" placeholder="招牌牛肉盖饭|主食|28&#10;双人工作日套餐|套餐|49"></textarea>
+                  <button class="topbar-button primary" type="submit">保存菜单</button>
+                </form>
+
+                <form class="settings-card" id="systemSettingsForm">
+                  <div class="product-panel-title">系统与平台密钥</div>
+                  <p class="settings-card-hint">密钥只显示掩码；留空并保存可清空数据库覆盖值。正式对接请填「外卖平台对接地址」。</p>
+                  <div class="settings-system-list" id="systemSettingsList"></div>
+                  <button class="topbar-button primary" type="submit">保存系统设置</button>
+                </form>
+
+                <div class="settings-card">
+                  <div class="product-panel-title">平台连接状态</div>
+                  <div class="settings-platform-list" id="settingsPlatformList"></div>
+                  <div class="settings-platform-actions">
+                    <select id="settingsPlatformSelect">
+                      <option value="meituan">美团外卖</option>
+                      <option value="eleme">饿了么</option>
+                      <option value="dianping">大众点评</option>
+                      <option value="douyin">抖音生活服务</option>
+                    </select>
+                    <select id="settingsPlatformMode">
+                      <option value="mock">演示同步</option>
+                      <option value="http">HTTP 正式对接</option>
+                      <option value="mobile">手机连接码</option>
+                    </select>
+                    <button class="topbar-button primary" type="button" id="settingsConnectPlatformBtn">连接 / 同步</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="dashboard-section collection-section workspace-panel" id="section-collection" data-workspace-panel="section-collection">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">数据采集 Agent · L1 感知层</div>
+                  <h2>公开数据采集中心</h2>
+                  <p>13 Agent 团队的眼睛：连接商家手机端可见页面，持续采集竞品菜品、价格、公开销量与变化证据。</p>
+                </div>
+                <div class="collection-head-actions">
+                  <div class="collection-live-status" id="collectionLiveStatus">正在检查连接状态</div>
+                  <button class="topbar-button primary" id="openCollectionConnectBtn">连接新平台</button>
+                </div>
+              </div>
+
+              <div class="matrix-hero" id="collectionAgentHero"></div>
+              <div class="collection-summary-grid" id="collectionSummaryGrid"></div>
+
+              <div class="collection-layout">
+                <div>
+                  <div class="collection-subhead">
+                    <div>
+                      <h3>平台连接</h3>
+                      <p>登录态只保存在商家手机，云端不接收账号密码。</p>
+                    </div>
+                    <div class="evidence-legend">
+                      <span>已观测</span>
+                      <span>已推导</span>
+                      <span>待验证</span>
+                    </div>
+                  </div>
+                  <div class="platform-grid" id="platformConnectionGrid"></div>
+                </div>
+
+                <aside class="collection-device-card">
+                  <div class="device-card-top">
+                    <div>
+                      <div class="section-kicker">商家手机</div>
+                      <h3>移动端采集 Agent</h3>
+                    </div>
+                    <div class="device-status-dot"></div>
+                  </div>
+                  <div class="phone-preview">
+                    <div class="phone-speaker"></div>
+                    <div class="phone-screen">
+                      <div class="phone-app-head">餐启 数据连接</div>
+                      <div class="phone-platform-row"><span>美团外卖</span><strong>待连接</strong></div>
+                      <div class="phone-platform-row"><span>大众点评</span><strong>待连接</strong></div>
+                      <div class="phone-platform-row"><span>饿了么</span><strong>待连接</strong></div>
+                      <div class="phone-platform-row"><span>抖音生活服务</span><strong>待连接</strong></div>
+                      <div class="phone-safe-note">密码不上传 · 只读公开页面</div>
+                    </div>
+                  </div>
+                  <div class="device-card-copy">用户在本机 WebView 登录，授权后自动建立重点竞品快照。</div>
+                  <button class="collection-device-button" id="openMobileGuideBtn">查看手机连接流程</button>
+                </aside>
+              </div>
+
+              <div class="collection-monitor-grid">
+                <div class="collection-monitor-panel">
+                  <div class="collection-subhead">
+                    <div>
+                      <h3>采集运行记录</h3>
+                      <p>高德发现、授权供应商和手机端快照统一进入审计链。</p>
+                    </div>
+                    <button class="link-button" id="runCollectionNowBtn">立即更新</button>
+                  </div>
+                  <div class="collection-run-list" id="collectionRunList"></div>
+                </div>
+                <div class="collection-monitor-panel">
+                  <div class="collection-subhead">
+                    <div>
+                      <h3>最近商品变化</h3>
+                      <p>只展示带原始证据的菜品变化。</p>
+                    </div>
+                    <div class="side-tag" id="collectionChangeCount">0 条</div>
+                  </div>
+                  <div class="collection-change-list" id="collectionChangeList"></div>
+                </div>
+              </div>
+            </section>
+              </div>
+            </section>
+          </main>
+
+          <aside class="right-column" id="rightColumn" data-collapsed="false" aria-hidden="false">
+            <div class="right-rail-head">
+              <div>
+                <div class="section-kicker">经营动态</div>
+                <strong>AI 正在工作</strong>
+              </div>
+              <button class="link-button" id="closeRightRailBtn" type="button">收起</button>
+            </div>
+
+            <section class="side-panel home-rail-panel" id="section-home-events">
+              <div class="side-head">
+                <h3>实时经营事件</h3>
+                <div class="side-tag" id="homeEventTag">今日</div>
+              </div>
+              <div class="home-event-feed" id="homeEventFeed"></div>
+            </section>
+
+            <section class="side-panel home-rail-panel" id="section-home-auto">
+              <div class="side-head">
+                <h3>MealKey 今天已自动完成</h3>
+              </div>
+              <div class="auto-activity-list" id="homeAutoActivityList"></div>
+            </section>
+
+            <section class="side-panel home-rail-panel" id="section-home-wins">
+              <div class="side-head">
+                <h3>最近实验结果</h3>
+                <div class="side-tag" id="homeWinsTag">0</div>
+              </div>
+              <div class="home-wins-feed" id="homeWinsFeed"></div>
+            </section>
+
+            <details class="home-evidence-details">
+              <summary>更多证据与回看</summary>
+            <section class="side-panel" id="section-competition-summary">
+              <div class="side-head">
+                <h3>周边竞争</h3>
+                <button class="link-button" id="scanCompetitionBtn">看周边变化</button>
+              </div>
+              <div class="panel-filter-row">
+                <button class="panel-filter active" data-competition-filter="intensity" aria-pressed="true">竞争最激烈</button>
+                <button class="panel-filter" data-competition-filter="change" aria-pressed="false">变化最大</button>
+              </div>
+              <div class="competition-radar-strip">
+                <div class="competition-map" id="competitionMap">
+                  <div class="map-empty">正在加载竞争地图…</div>
+                </div>
+                <div class="map-status" id="competitionCollectionStatus">正在读取采集状态…</div>
+              </div>
+              <p class="side-copy" id="competitionSummary">正在读取商圈竞争结果…</p>
+              <div class="competitor-list" id="competitorList"></div>
+              <div class="side-footnote" id="competitionFootnote">先看周边有没有新动作</div>
+            </section>
+
+            <section class="side-panel" id="section-daily">
+              <div class="side-head">
+                <h3>昨日简报</h3>
+                <div class="side-tag" id="yesterdayDate">昨日</div>
+              </div>
+              <div class="mini-metric-grid" id="yesterdayMetrics"></div>
+              <div class="side-subtitle">昨天为什么这样</div>
+              <div class="reason-list" id="yesterdayReasons"></div>
+            </section>
+
+            <section class="side-panel" id="section-experiments">
+              <div class="side-head">
+                <h3>动作回看</h3>
+                <div class="side-tag" id="experimentTag">还在观察</div>
+              </div>
+              <div class="summary-pill-row" id="executionSummary"></div>
+              <div class="experiment-list" id="experimentTracker"></div>
+              <div class="side-subtitle" style="margin-top:12px;">最近经验</div>
+              <div class="strategy-memory-side" id="strategyMemorySide"></div>
+            </section>
+            </details>
+          </aside>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="profile-modal" id="ownerProfileModal" aria-hidden="true">
+      <div class="profile-modal-backdrop" data-profile-modal-close></div>
+      <section class="profile-modal-panel" role="dialog" aria-modal="true" aria-labelledby="ownerProfileTitle">
+        <div class="profile-modal-head">
+          <div>
+            <div class="section-kicker">个人资料</div>
+            <h2 id="ownerProfileTitle">修改用户信息</h2>
+          </div>
+          <button class="profile-modal-close" type="button" data-profile-modal-close aria-label="关闭">×</button>
+        </div>
+        <form id="ownerProfileForm" class="profile-form">
+          <div class="profile-avatar-edit">
+            <button type="button" class="profile-avatar-preview" id="ownerAvatarPreview" aria-label="更换头像">王</button>
+            <div class="profile-avatar-actions">
+              <strong>头像</strong>
+              <p>点头像或下方按钮更换照片，保存后顶栏同步更新。</p>
+              <div class="profile-avatar-btns">
+                <button type="button" class="topbar-button" id="ownerAvatarPickBtn">上传照片</button>
+                <button type="button" class="topbar-button" id="ownerAvatarClearBtn">用名字首字</button>
+              </div>
+              <input id="ownerAvatarFileInput" type="file" accept="image/*" hidden />
+            </div>
+          </div>
+          <label class="profile-field">
+            <span>称呼</span>
+            <input id="ownerDisplayNameInput" name="display_name" type="text" maxlength="40" placeholder="例如：王老板" required />
+          </label>
+          <label class="profile-field">
+            <span>角色</span>
+            <select id="ownerRoleSelect" name="role">
+              <option value="老板">老板</option>
+              <option value="店长">店长</option>
+              <option value="运营">运营</option>
+              <option value="其他">其他</option>
+            </select>
+          </label>
+          <label class="profile-field">
+            <span>手机号</span>
+            <input id="ownerPhoneInput" name="phone" type="tel" maxlength="32" placeholder="选填，方便联系确认" />
+          </label>
+          <p class="profile-store-hint">当前门店：<strong id="ownerProfileStoreName">—</strong></p>
+          <div class="profile-modal-actions">
+            <button type="button" class="topbar-button" data-profile-modal-close>取消</button>
+            <button type="submit" class="topbar-button primary" id="ownerProfileSaveBtn">保存</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div class="collection-modal" id="collectionModal" aria-hidden="true">
+      <div class="collection-modal-backdrop" data-collection-modal-close></div>
+      <section class="collection-modal-panel" role="dialog" aria-modal="true" aria-labelledby="collectionModalTitle">
+        <div class="collection-modal-head">
+          <div>
+            <div class="section-kicker">安全连接</div>
+            <h2 id="collectionModalTitle">连接平台账号</h2>
+          </div>
+          <button class="collection-modal-close" data-collection-modal-close aria-label="关闭">×</button>
+        </div>
+        <div class="connection-step-list">
+          <div class="connection-step"><span>1</span><div><strong>在商家手机打开 MealKey 餐启</strong><p>选择平台后，在本机受控 WebView 中亲自登录。</p></div></div>
+          <div class="connection-step"><span>2</span><div><strong>确认只读数据范围</strong><p>菜品名称、价格、公开销量、套餐、图片、评分和评价。</p></div></div>
+          <div class="connection-step"><span>3</span><div><strong>完成首次前台采集</strong><p>保持页面前台，Agent 建立第一份竞品商品快照。</p></div></div>
+        </div>
+        <div class="connection-safety">
+          <strong>安全边界</strong>
+          <p>密码和登录态不上传餐启云端；不执行交易、不修改店铺、不绕过验证码。</p>
+        </div>
+        <div class="collection-code-box">
+          <div>
+            <span>手机连接码</span>
+            <strong id="mobileConnectCode">------</strong>
+          </div>
+          <button class="topbar-button" id="generateConnectCodeBtn">生成连接码</button>
+        </div>
+        <p class="connect-poll-status" id="connectPollStatus" data-state="idle">打开弹窗后会自动生成连接码，并等待手机端确认。</p>
+        <div class="collection-modal-actions">
+          <button class="topbar-button" data-collection-modal-close>稍后连接</button>
+          <button class="topbar-button" id="demoConfirmConnectBtn">模拟手机确认</button>
+          <button class="topbar-button primary" id="copyMobileGuideBtn">复制连接说明</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

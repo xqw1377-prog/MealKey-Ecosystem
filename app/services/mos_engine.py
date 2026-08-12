@@ -150,6 +150,7 @@ SAFE_MODE_ALLOWED_ACTIONS = {
     "fix_top_review_theme",
     "pin_positive_review_themes",
     "refresh_hero_image",
+    "change_main_image",
     "change_title",
     "menu_patch",
     "menu_cleanup",

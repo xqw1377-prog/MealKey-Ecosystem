@@ -123,3 +123,34 @@ def test_annotate_action_gates_respects_safe_mode() -> None:
         system_mode="operating",
     )
     assert operating[0].create_enabled is True
+
+
+def test_annotate_action_gates_memory_veto() -> None:
+    from types import SimpleNamespace
+
+    from app.schemas.agents import AgentPriorityAction
+    from app.schemas.store_state import ProfitState
+    from app.services.matrix_agents.common import annotate_action_gates
+
+    profit = ProfitState(take_home_rate=0.7, contribution_profit_per_order=8, data_quality="observed")
+    action = AgentPriorityAction(
+        action_type="join_lunch_campaign",
+        title="参加午市活动",
+        detail="test",
+        expected_metric="orders",
+        expected_lift_pct_high=10,
+        object_ref="store",
+        object_name="店",
+    )
+    memory = SimpleNamespace(
+        items=[SimpleNamespace(action_type="join_lunch_campaign", result="negative", lesson="上次买流水", avoid_when="别再报同类活动")]
+    )
+    gated = annotate_action_gates(
+        [action],
+        agent_key="promo",
+        profit_state=profit,
+        system_mode="operating",
+        strategy_memory=memory,
+    )
+    assert gated[0].create_enabled is False
+    assert "策略记忆" in (gated[0].create_block_reason or "")

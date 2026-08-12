@@ -100,3 +100,27 @@ def test_interview_nl_miss_returns_none():
     store_id = seeded["store_id"]
     hit = handle_understanding_intent(db, store_id, "今天天气真好", key="priority_style")
     assert hit is None
+
+
+def test_handle_user_intent_compiles_action():
+    db = _session()
+    seeded = seed_demo(db)
+    hit = handle_user_intent(db, seeded["store_id"], "换牛肉饭主图")
+    assert hit is not None
+    assert hit["intent"] == "action"
+    assert hit["decision"]["action_type"] == "change_main_image"
+    assert hit["decision"]["execution_tier"] == "draft"
+
+
+def test_ingest_attachment_knowledge_writes_profile():
+    from types import SimpleNamespace
+
+    from app.services.mue.engine import ingest_attachment_knowledge
+
+    db = _session()
+    seeded = seed_demo(db)
+    files = [SimpleNamespace(name="菜单.png", extracted_text="牛肉饭 28元 套餐 39元")]
+    view = ingest_attachment_knowledge(db, seeded["store_id"], files)
+    assert view is not None
+    assert "牛肉饭" in view.store_profile.get("from_files", "")
+    assert view.store_profile.get("has_menu_snapshot") is True

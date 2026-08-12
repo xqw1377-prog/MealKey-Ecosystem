@@ -236,7 +236,7 @@ def bootstrap_understanding(
         gaps = [g for g in gaps if g != "priority_style"]
     if base.constraints.lunch_capacity_per_hour is not None:
         gaps = [g for g in gaps if g != "lunch_capacity"]
-    if base.permissions.low_risk_auto_ok:
+    if base.permissions.low_risk_auto_ok is not None:
         gaps = [g for g in gaps if g != "low_risk_auto"]
     if base.constraints.profit_floor_rate is not None:
         gaps = [g for g in gaps if g != "profit_floor"]

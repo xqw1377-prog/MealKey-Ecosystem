@@ -334,13 +334,37 @@ def _build_feed(queue, events, runtime_bridge_feed=None) -> list[dict[str, Any]]
 
 def _candidate_title(candidate) -> str:
     odo = candidate.odo
-    return (
+    raw = (
         odo.recommended_action.title
         or odo.object.name
         or odo.diagnosis.primary
         or odo.why_now
         or "经营任务"
     )
+    return _humanize_candidate_title(raw)
+
+
+def _humanize_candidate_title(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return "经营任务"
+    replacements = {
+        "baseline_window": "基线期",
+        "benchmark_window": "对照期",
+        "benchmark": "对照",
+        "orders": "订单",
+        "gmv": "营业额",
+        "ctr": "点击率",
+        "cvr": "转化率",
+        "impressions": "曝光",
+        "visits": "进店",
+    }
+    for source, target in replacements.items():
+        value = value.replace(source, target)
+    value = value.replace("_", " ")
+    value = " ".join(value.split())
+    value = value.replace("较 ", "较").replace(" 下降", "下降").replace(" 上升", "上升")
+    return value
 
 
 def _candidate_prompt(candidate) -> str:

@@ -5,7 +5,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV APP_ENV=production
-ENV DATABASE_URL=sqlite:////data/mealky.db
+# 默认留给 compose 注入 Postgres；单容器本地可覆盖为 sqlite:////data/mealky.db
+ENV DATABASE_URL=postgresql+psycopg://mealky:mealky@db:5432/mealky
 
 # 独立部署：镜像只含本仓代码与内置 llm_engine，不含主仓依赖、不烘焙 API Key
 COPY requirements.txt .

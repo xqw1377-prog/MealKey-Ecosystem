@@ -108,7 +108,7 @@ class PermissionPolicy(BaseModel):
     monitor_stockout: bool = True
     monitor_competitors: bool = True
     ads_auto_daily_limit_cny: Optional[float] = None  # None = 未授权自动调投流
-    low_risk_auto_ok: bool = False
+    low_risk_auto_ok: Optional[bool] = None  # None = 未确认；True/False 都算已表态
     notes: str = ""
 
 
@@ -129,9 +129,11 @@ class MerchantUnderstanding(BaseModel):
     unknown_count: int = 0
     updated_at: Optional[datetime] = None
     principle: str = "Ask Only What AI Cannot Know."
+    platform_connected: bool = False  # 真实 PlatformConnection.status==connected
     # Minimum Operating State 检查结果
     mos_satisfied: bool = False  # MOS 是否满足
-    mos_blocking_fields: list[str] = Field(default_factory=list)  # 阻塞 MOS 的字段
+    mos_blocking_fields: list[str] = Field(default_factory=list)  # MOS 聚合字段
+    mos_gap_keys: list[str] = Field(default_factory=list)  # 对应访谈 open_gaps key
 
 
 class UnderstandingUpdateResult(BaseModel):

@@ -35,5 +35,20 @@ class PlatformConnection(IdMixin, TimestampMixin, Base):
     external_store_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     connector_mode: Mapped[str] = mapped_column(String(32), default="mock")  # mock | http | mobile
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ConnectCode(IdMixin, TimestampMixin, Base):
+    """手机连接码（落库，多 worker / 重启不丢）。"""
+
+    __tablename__ = "connect_code"
+    __table_args__ = (UniqueConstraint("code", name="uq_connect_code"),)
+
+    code: Mapped[str] = mapped_column(String(16), index=True)
+    store_id: Mapped[str] = mapped_column(String(36), index=True)
+    platform: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

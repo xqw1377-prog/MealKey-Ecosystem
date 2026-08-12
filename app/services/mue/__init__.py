@@ -4,6 +4,7 @@ from app.services.mue.engine import (
     begin_interview_turn,
     ensure_understanding,
     handle_understanding_intent,
+    light_agents_for_store,
     load_understanding,
     next_interview_question,
     understanding_gap_candidate,
@@ -16,4 +17,5 @@ __all__ = [
     "begin_interview_turn",
     "next_interview_question",
     "understanding_gap_candidate",
+    "light_agents_for_store",
 ]

@@ -668,6 +668,8 @@ body.sidebar-open {
 }
 
 .profile-avatar {
+  position: relative;
+  overflow: hidden;
   width: 34px;
   height: 34px;
   border-radius: 50%;

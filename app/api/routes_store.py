@@ -472,14 +472,6 @@ def rebuild_store_growth_plan(
 
 
 
-@router.get("/{store_id}/item-image")
-def food_image_proxy_store(store_id: str, name: str = "中式快餐"):
-    """菜品占位图代理（按门店）。"""
-    from urllib.parse import quote
-    from fastapi.responses import RedirectResponse
-    subject = quote(f"{name}，中式外卖美食摄影，热气腾腾，真实菜品特写，木质桌面，自然光，高质感餐饮品牌图片")
-    return RedirectResponse(f"https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt={subject}&image_size=square_hd", status_code=302)
-
 @router.get("/{store_id}/agents/{agent_key}")
 def get_single_agent(store_id: str, agent_key: AgentKey, days: int = Query(default=7, ge=1), db: Session = Depends(get_db)):
     payload = build_single_agent(db=db, store_id=store_id, agent_key=agent_key, days=days)
@@ -519,10 +511,12 @@ def explain_action_trace(store_id: str, trace_id: str, db: Session = Depends(get
 
 @router.get("/{store_id}/item-image")
 def proxy_item_image(store_id: str, name: str = Query(default="中式快餐", max_length=80)):
-    """代理 Trae 菜品示意生图，避免前端硬编码第三方域名。"""
+    """代理 Trae 菜品示意生图（单一实现；<img> 免 token）。"""
     _ = store_id
+    clean = "".join(ch for ch in (name or "中式快餐").strip() if ch.isprintable() and ch not in "<>\"'\\")
+    clean = clean[:60] or "中式快餐"
     subject = (
-        f"{(name or '中式快餐').strip()}，中式外卖美食摄影，热气腾腾，真实菜品特写，"
+        f"{clean}，中式外卖美食摄影，热气腾腾，真实菜品特写，"
         "木质桌面，自然光，高质感餐饮品牌图片"
     )
     upstream = (

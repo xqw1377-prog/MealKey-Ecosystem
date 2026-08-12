@@ -1,4 +1,7 @@
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -258,33 +261,151 @@ def _run_clock_phase(db: Session, store_id: str, phase: str) -> dict:
     except Exception as exc:  # noqa: BLE001 — POIE 失败不阻塞 Clock
         result["poie_error"] = str(exc)[:80]
 
+    # ═══ WP2: 执行分级仲裁 —— AUTO_AND_REPORT 真正自动执行（高峰保护时段不动菜单） ═══
+    if phase not in ("lunch_protect",):
+        try:
+            from app.services.execution_policy import auto_execute_recommendations
+
+            auto_results = auto_execute_recommendations(db, store_id)
+            if auto_results:
+                result["auto_executed"] = [
+                    r for r in auto_results if r.get("applied")
+                ]
+                result["auto_dropped"] = sum(1 for r in auto_results if r.get("mode") == "DROP")
+        except Exception as exc:  # noqa: BLE001 — 自动执行失败不阻塞 Clock
+            result["auto_execute_error"] = str(exc)[:80]
+
     return result
 
-    if phase == "lunch_nba":
-        # 午高峰前 Next Best Action
-        growth = ctx.recommendations[:3]
-        return {
-            "status": "completed",
-            "candidate_actions": len(growth),
-            "summary": f"午餐前评估了 {len(growth)} 个候选动作",
-        }
 
-    if phase == "lunch_protect":
-        # Protect Mode：只看严重异常
-        events = build_operating_events(ctx.store_state)
-        protect_events = [e for e in events.events if e.severity in ("critical", "high")]
-        return {
-            "status": "completed",
-            "protect_alerts": len(protect_events),
-        }
+# ═══ WP1: 店级节律调度 —— 对的时间干对的事 ═══
 
-    if phase in ("lunch_review", "evening_review"):
-        # 餐段/晚间复盘
-        events = build_operating_events(ctx.store_state)
-        return {
-            "status": "completed",
-            "events_count": len(events.events),
-            "summary": events.summary,
-        }
 
-    return {"status": "unknown_phase"}
+def _clock_marker_key(store_id: str, phase: str, day: str) -> str:
+    return f"clock_run:{store_id}:{day}:{phase}"
+
+
+def _clock_already_ran(db: Session, store_id: str, phase: str, day: str) -> bool:
+    from app.models.settings import AppSetting
+
+    return (
+        db.execute(
+            select(AppSetting.id).where(AppSetting.key == _clock_marker_key(store_id, phase, day)).limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
+def _mark_clock_ran(db: Session, store_id: str, phase: str, day: str) -> None:
+    from app.models.settings import AppSetting
+
+    db.add(AppSetting(key=_clock_marker_key(store_id, phase, day), value=datetime.now(timezone.utc).isoformat()))
+    db.commit()
+
+
+@celery_app.task(name="ops.rhythm_tick")
+def rhythm_tick() -> dict:
+    """WP1: 每 30 分钟一次的节律心跳——逐店按自己的经营节律命中 phase 才执行。
+
+    取代全网统一 crontab：夜宵店的高峰保护自然落到它 22:00 的真高峰。
+    幂等：每店每日每 phase 只跑一次（AppSetting 标记）。
+    """
+    from zoneinfo import ZoneInfo
+
+    from app.services.operating_rhythm import is_in_quiet_hours, match_phase, resolve_store_rhythm
+
+    now_local = datetime.now(ZoneInfo("Asia/Shanghai"))
+    day = now_local.strftime("%Y-%m-%d")
+    hour = now_local.hour
+
+    db = SessionLocal()
+    try:
+        store_ids = list(db.execute(select(Store.id).where(Store.status == "active")).scalars())
+        results = []
+        for store_id in store_ids:
+            try:
+                rhythm = resolve_store_rhythm(db, store_id)
+                phase = match_phase(hour, rhythm)
+                if not phase:
+                    results.append({"store_id": store_id, "phase": None, "status": "no_phase"})
+                    continue
+                if is_in_quiet_hours(rhythm, hour) and phase not in ("night_learn", "deep_review"):
+                    results.append({"store_id": store_id, "phase": phase, "status": "quiet_hours"})
+                    continue
+                if _clock_already_ran(db, store_id, phase, day):
+                    results.append({"store_id": store_id, "phase": phase, "status": "already_ran"})
+                    continue
+                phase_result = _run_clock_phase(db, store_id, phase)
+                _mark_clock_ran(db, store_id, phase, day)
+                results.append({"store_id": store_id, "phase": phase, "rhythm_source": rhythm.source, **phase_result})
+            except Exception as exc:  # noqa: BLE001
+                results.append({"store_id": store_id, "error": str(exc)[:100]})
+        return {"tick_at": now_local.isoformat(), "store_count": len(store_ids), "results": results}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="ops.follow_up_decisions")
+def follow_up_decisions() -> dict:
+    """WP3: next_check_at 消费者——AI 说过的每句"观察 48 小时"都会兑现成结果通知。
+
+    扫描到期的 OperatingDecision，评估结果，推送通知，沉淀 strategy_memory。
+    """
+    from datetime import timezone as _tz
+    from app.models.operating_decision import OperatingDecision
+
+    db = SessionLocal()
+    try:
+        now_utc = datetime.now(_tz.utc)
+        due = list(
+            db.execute(
+                select(OperatingDecision).where(
+                    OperatingDecision.next_check_at.is_not(None),
+                    OperatingDecision.next_check_at <= now_utc,
+                    OperatingDecision.status.in_(("created", "arbitrated", "executing", "observed")),
+                )
+            ).scalars()
+        )
+        results = []
+        for decision in due:
+            try:
+                outcome = _evaluate_decision_outcome(db, decision)
+                if outcome.get("conclusive"):
+                    decision.status = "resolved"
+                    decision.resolved_at = now_utc
+                    decision.next_check_at = None
+                else:
+                    decision.status = "observed"
+                    decision.next_check_at = now_utc + timedelta(hours=24)
+                db.add(decision)
+                results.append({"decision_id": decision.id, "outcome": outcome.get("verdict", "unknown")})
+            except Exception as exc:  # noqa: BLE001
+                results.append({"decision_id": decision.id, "error": str(exc)[:80]})
+        db.commit()
+        return {"checked": len(due), "results": results}
+    finally:
+        db.close()
+
+
+def _evaluate_decision_outcome(db: Session, decision: OperatingDecision) -> dict:
+    """评估单个决策的结果。"""
+    from app.services.experiment_attribution import evaluate_experiment
+
+    # 如果有关联的 experiment，复用归因逻辑
+    if decision.work_thread_id:
+        from app.models.ohre import Experiment
+
+        exp = db.execute(
+            select(Experiment)
+            .where(Experiment.recommendation_id == decision.id)
+            .limit(1)
+        ).scalar_one_or_none()
+        if exp and exp.result in ("pending", None):
+            outcome = evaluate_experiment(db, exp, days=7)
+            return {
+                "conclusive": outcome.result in ("positive", "negative", "neutral", "unknown"),
+                "verdict": outcome.result,
+                "lift_pct": outcome.lift_pct,
+            }
+    # 无实验：检查 confidence 是否足够
+    return {"conclusive": False, "verdict": "pending"}

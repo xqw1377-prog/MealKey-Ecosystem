@@ -378,9 +378,11 @@ def trigger_understanding(
     if not gap:
         return []
 
-    # 判断这个缺口是否阻塞 MOS
+    # 判断这个缺口是否阻塞 MOS（gap key 与 MOS 聚合字段通过映射对齐）
     gap_key = gap.get("key", "")
-    is_blocking = gap_key in (u.mos_blocking_fields or [])
+    from app.services.mos_engine import gap_blocks_mos
+
+    is_blocking = gap_blocks_mos(gap_key, u)
 
     # Ask Engine：用 ask_score 判断值不值得问（Content Engine V1 §06）
     from app.services.ask_engine import should_ask

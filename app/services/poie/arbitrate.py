@@ -81,7 +81,7 @@ def merge_candidates_into_queue(
     queue: OpsQueueBrief,
     candidates: list[CandidateAction],
 ) -> OpsQueueBrief:
-    """仲裁候选并合并；保持「少打扰」：need_you 最多 3。"""
+    """仲裁候选并合并；保持「少打扰」：need_you 最多 1 张 NBA。"""
     cards = [c for c in (candidate_to_card(x) for x in candidates) if c]
     seen = {c.title for c in queue.need_you + queue.working + queue.results + queue.opportunities}
 
@@ -100,7 +100,7 @@ def merge_candidates_into_queue(
 
     # 重新按优先级排序并截断
     before = len(queue.need_you)
-    queue.need_you = sorted(queue.need_you, key=lambda c: c.priority_score, reverse=True)[:3]
+    queue.need_you = sorted(queue.need_you, key=lambda c: c.priority_score, reverse=True)[:1]
     queue.filtered_noop_count += max(0, before - len(queue.need_you))
     queue.working = queue.working[:6]
     queue.results = queue.results[:4]

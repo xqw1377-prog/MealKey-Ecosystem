@@ -11,16 +11,23 @@ MOS 必须项（材料 §一启动前清单）：
 4. 关键约束（lunch_capacity_per_hour 或 profit_floor_rate 至少有一个）
 
 Safe Mode 行为：
-- ✅ 允许：分析、回复评价、监控竞争、商品建议
-- ❌ 禁止：自动执行活动参加/价格调整/投流加预算
+- 允许：分析、回复评价、监控竞争、商品建议
+- 禁止：自动执行活动参加/价格调整/投流加预算
 """
 
 from __future__ import annotations
 
 from app.schemas.merchant_understanding import MerchantUnderstanding
 
+# MOS 聚合字段 → 访谈 gap key（前端/Ask Engine 用 gap，不用 MOS 名当提交 key）
+MOS_TO_GAPS: dict[str, list[str]] = {
+    "platform_connected": [],
+    "priority_style": ["priority_style"],
+    "risk_boundary": ["low_risk_auto"],
+    "key_constraint": ["lunch_capacity", "profit_floor", "hero_item_floor_price"],
+}
+
 # MOS 必须字段定义：(field_key, check_fn, blocking_desc)
-# check_fn 接收 MerchantUnderstanding，返回 bool（是否满足）
 _MOS_FIELDS: list[tuple[str, object, str]] = []
 
 
@@ -37,7 +44,10 @@ def _mos_check(name: str):
 @_mos_check("platform_connected")
 def _check_platform(mu: MerchantUnderstanding) -> bool:
     """平台连接"""
-    return mu.onboarding_stage in {"interview", "operating"} or bool(mu.store_profile)
+    if getattr(mu, "platform_connected", False):
+        return True
+    profile = mu.store_profile or {}
+    return bool(profile.get("platform_connected"))
 
 
 @_mos_check("priority_style")
@@ -49,7 +59,7 @@ def _check_priority(mu: MerchantUnderstanding) -> bool:
 @_mos_check("risk_boundary")
 def _check_risk(mu: MerchantUnderstanding) -> bool:
     """风险边界（至少知道低风险能不能自动做）"""
-    return mu.permissions.low_risk_auto_ok is not None  # True 或 False 都算"已确认"
+    return mu.permissions.low_risk_auto_ok is not None
 
 
 @_mos_check("key_constraint")
@@ -77,6 +87,43 @@ def check_mos(mu: MerchantUnderstanding) -> tuple[bool, list[str]]:
     return (len(blocking) == 0, blocking)
 
 
+def mos_gap_keys_for(mu: MerchantUnderstanding, blocking: list[str] | None = None) -> list[str]:
+    """把 MOS 阻塞项展开成访谈 gap key，并与 open_gaps 求交。"""
+    fields = blocking if blocking is not None else list(mu.mos_blocking_fields or [])
+    expanded: list[str] = []
+    for field in fields:
+        mapped = MOS_TO_GAPS.get(field)
+        if mapped is None:
+            expanded.append(field)
+        else:
+            expanded.extend(mapped)
+    open_gaps = list(mu.open_gaps or [])
+    if open_gaps:
+        open_set = set(open_gaps)
+        ordered = [key for key in expanded if key in open_set]
+        if ordered:
+            return list(dict.fromkeys(ordered))
+        leftover = [key for key in open_gaps if key in set(expanded) or key in MOS_TO_GAPS]
+        if leftover:
+            return leftover
+        return open_gaps[:1]
+    return list(dict.fromkeys(expanded))
+
+
+def gap_blocks_mos(gap_key: str, mu: MerchantUnderstanding) -> bool:
+    """访谈缺口是否对应仍未满足的 MOS 项。"""
+    key = str(gap_key or "").strip()
+    if not key:
+        return False
+    blocking = list(mu.mos_blocking_fields or [])
+    if key in blocking:
+        return True
+    for field in blocking:
+        if key in MOS_TO_GAPS.get(field, []):
+            return True
+    return False
+
+
 def determine_system_mode(mu: MerchantUnderstanding) -> str:
     """决定系统模式：operating 或 safe。
 
@@ -88,7 +135,6 @@ def determine_system_mode(mu: MerchantUnderstanding) -> str:
 
 
 SAFE_MODE_BLOCKED_ACTIONS = {
-    # Safe Mode 下禁止自动执行的动作类型
     "join_lunch_campaign",
     "match_competitor_promo",
     "launch_value_bundle_promo",
@@ -99,7 +145,6 @@ SAFE_MODE_BLOCKED_ACTIONS = {
 }
 
 SAFE_MODE_ALLOWED_ACTIONS = {
-    # Safe Mode 下允许的动作类型
     "batch_reply_negative_reviews",
     "publish_service_reply_scripts",
     "fix_top_review_theme",
@@ -118,7 +163,6 @@ def is_action_allowed_in_safe_mode(action_type: str) -> bool:
         return True
     if action_type in SAFE_MODE_BLOCKED_ACTIONS:
         return False
-    # 未知动作默认不允许在 Safe Mode 自动执行
     return False
 
 
@@ -127,5 +171,6 @@ def update_mos_status(mu: MerchantUnderstanding) -> MerchantUnderstanding:
     satisfied, blocking = check_mos(mu)
     mu.mos_satisfied = satisfied
     mu.mos_blocking_fields = blocking
+    mu.mos_gap_keys = mos_gap_keys_for(mu, blocking)
     mu.system_mode = "operating" if satisfied else "safe"  # type: ignore
     return mu

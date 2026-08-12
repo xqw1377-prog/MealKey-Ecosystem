@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-from fastapi.responses import RedirectResponse
 
 from app.core.config import settings
 from app.services.llm_engine import is_llm_configured, llm_status
@@ -83,25 +82,3 @@ def public_config():
             "timezone": "Asia/Shanghai",
         },
     }
-
-
-# ═══ 通知端点（受 token 保护，但放在 public 方便前端路径） ═══
-
-from fastapi import Depends, Query
-from sqlalchemy.orm import Session
-from app.db.session import get_db
-
-
-@router.get("/notifications/{store_id}")
-def get_notifications(store_id: str, limit: int = Query(default=20, ge=1, le=50), db: Session = Depends(get_db)):
-    """获取门店未读通知。"""
-    from app.services.notification_service import get_unread_notifications
-    return {"notifications": get_unread_notifications(db, store_id, limit)}
-
-
-@router.post("/notifications/{notification_id}/read")
-def read_notification(notification_id: str, db: Session = Depends(get_db)):
-    """标记通知已读。"""
-    from app.services.notification_service import mark_notification_read
-    ok = mark_notification_read(db, notification_id)
-    return {"ok": ok}

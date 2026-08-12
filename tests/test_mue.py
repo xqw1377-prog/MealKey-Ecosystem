@@ -75,3 +75,28 @@ def test_handle_understanding_persists():
     assert hit is not None
     u = load_understanding(db, store_id)
     assert u.permissions.auto_reply_good_reviews is True
+    assert u.permissions.low_risk_auto_ok is True
+    assert "low_risk_auto" not in u.open_gaps
+    assert "risk_boundary" not in u.mos_blocking_fields
+
+
+def test_handle_understanding_uses_explicit_key():
+    db = _session()
+    seeded = seed_demo(db)
+    store_id = seeded["store_id"]
+    hit = handle_understanding_intent(db, store_id, "提高排名", key="priority_style")
+    assert hit is not None
+    assert hit.get("accepted") is True
+    u = load_understanding(db, store_id)
+    assert u.preferences.priority_style == "rank"
+    assert "priority_style" not in u.open_gaps
+    assert u.mos_satisfied is False
+    assert "priority_style" not in u.mos_blocking_fields
+
+
+def test_interview_nl_miss_returns_none():
+    db = _session()
+    seeded = seed_demo(db)
+    store_id = seeded["store_id"]
+    hit = handle_understanding_intent(db, store_id, "今天天气真好", key="priority_style")
+    assert hit is None

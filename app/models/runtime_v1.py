@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import Date, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.time import utc_now
 from app.db.base import Base
 from app.models.common import IdMixin, TimestampMixin
 
@@ -16,7 +17,7 @@ class StoreStateSnapshotRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "store_state_snapshot"
 
     store_id: Mapped[str] = mapped_column(ForeignKey("store.id"), index=True)
-    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     state_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
@@ -53,7 +54,7 @@ class SignalRecord(IdMixin, TimestampMixin, Base):
     value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     baseline: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class BusinessEventRecord(IdMixin, TimestampMixin, Base):
@@ -72,7 +73,7 @@ class BusinessEventRecord(IdMixin, TimestampMixin, Base):
     observation_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     severity: Mapped[str] = mapped_column(String(16), default="medium")
     status: Mapped[str] = mapped_column(String(16), default="OPEN")
-    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class DailyOperatingPlanRecord(IdMixin, TimestampMixin, Base):
@@ -116,7 +117,7 @@ class RuntimeEventRecord(IdMixin, TimestampMixin, Base):
     execution_mode: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="open")
     source_odo_id: Mapped[Optional[str]] = mapped_column(ForeignKey("operating_decision.id"), nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

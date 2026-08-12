@@ -91,3 +91,35 @@ def test_growth_pool_can_include_matrix_sources() -> None:
         "review",
         "store_matrix",
     }
+
+
+def test_annotate_action_gates_respects_safe_mode() -> None:
+    from app.schemas.agents import AgentPriorityAction
+    from app.schemas.store_state import ProfitState
+    from app.services.matrix_agents.common import annotate_action_gates
+
+    profit = ProfitState(take_home_rate=0.7, contribution_profit_per_order=8, data_quality="observed")
+    action = AgentPriorityAction(
+        action_type="join_lunch_campaign",
+        title="参加午市活动",
+        detail="test",
+        expected_metric="orders",
+        expected_lift_pct_high=10,
+        object_ref="store",
+        object_name="店",
+    )
+    gated = annotate_action_gates(
+        [action],
+        agent_key="promo",
+        profit_state=profit,
+        system_mode="safe",
+    )
+    assert gated[0].create_enabled is False
+    assert gated[0].profit_gate_allowed is False
+    operating = annotate_action_gates(
+        [action],
+        agent_key="promo",
+        profit_state=profit,
+        system_mode="operating",
+    )
+    assert operating[0].create_enabled is True

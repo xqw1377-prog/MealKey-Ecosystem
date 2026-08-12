@@ -12,7 +12,9 @@ from app.api.routes_dev import seed_demo
 from app.db.session import get_db
 from app.models.entities import ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, Merchant, ShopFunnelDaily, Store
 from app.models.intake import IntakeRawAsset, IntakeSubmission
+from app.models.notification import Notification
 from app.models.ohre import Experiment, Hypothesis, Observation, Recommendation
+from app.models.settings import AppSetting
 from app.schemas.workspace import AskRequest, DocumentSyncRequest, IntakeSubmitRequest, IntakePreviewRequest
 from app.services.agents import build_store_agents
 from app.services.chat_attachments import build_attachment_context, parse_upload_files
@@ -1380,6 +1382,49 @@ def bootstrap_workspace(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/stores/{store_id}/notifications")
+def get_store_notifications(
+    store_id: str,
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """获取门店未读通知（需 token；已从 /public 迁出）。"""
+    from app.services.notification_service import get_unread_notifications
+
+    store = _load_store(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    return {"notifications": get_unread_notifications(db, store_id, limit)}
+
+
+@router.post("/notifications/{notification_id}/read")
+def read_store_notification(notification_id: str, db: Session = Depends(get_db)):
+    """标记通知已读。"""
+    from app.services.notification_service import mark_notification_read
+
+    ok = mark_notification_read(db, notification_id)
+    return {"ok": ok}
+
+
+@router.post("/platforms/oauth/{platform}/start")
+def start_platform_oauth(platform: str, store_id: str = Query(default="")):
+    """平台 OAuth 入口：未配置时明确 501，避免空骨架假装可用。"""
+    from app.services.platform_oauth import get_oauth_url, is_oauth_configured
+
+    key = (platform or "").strip().lower()
+    if key not in {"meituan", "eleme"}:
+        raise HTTPException(status_code=400, detail="unsupported platform")
+    if not is_oauth_configured(key):
+        raise HTTPException(
+            status_code=501,
+            detail="OAuth not configured for this platform; use connect-code flow instead",
+        )
+    url = get_oauth_url(key, state=store_id or key)
+    if not url:
+        raise HTTPException(status_code=501, detail="OAuth URL unavailable")
+    return {"ok": True, "platform": key, "oauth_url": url}
+
+
 @router.get("/stores/{store_id}/dashboard")
 def get_store_dashboard(
     store_id: str,
@@ -1430,7 +1475,15 @@ def ask_store_manager(
     store = _load_store(db, store_id)
     if store is None:
         raise HTTPException(status_code=404, detail="store not found")
-    return _route_answer_store_manager(db=db, store_id=store_id, question=payload.question, days=payload.days, use_shortcuts=True)
+    result = _route_answer_store_manager(
+        db=db,
+        store_id=store_id,
+        question=payload.question,
+        shortcut_question=payload.question,
+        days=payload.days,
+        use_shortcuts=True,
+    )
+    return _attach_runtime_context(store_id, db, result)
 
 
 @router.post("/stores/{store_id}/ask-rich")
@@ -1449,19 +1502,25 @@ async def ask_store_manager_rich(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     attachment_context = build_attachment_context(parsed_files)
+    if parsed_files:
+        from app.services.mue.engine import ingest_attachment_knowledge
+
+        ingest_attachment_knowledge(db, store_id, parsed_files)
     base_question = (question or "").strip() or "请先帮我读取这些附件，提炼重点，再告诉我接下来该怎么处理。"
     enriched_question = base_question if not attachment_context else f"{base_question}\n\n{attachment_context}"
     result = _route_answer_store_manager(
         db=db,
         store_id=store_id,
         question=enriched_question,
+        shortcut_question=base_question,
         days=max(1, int(days or 7)),
-        use_shortcuts=not parsed_files,
+        use_shortcuts=True,
     )
     result["attachments"] = [item.to_public_dict() for item in parsed_files]
-    return result
+    return _attach_runtime_context(store_id, db, result)
 
 
+@router.get("/stores/{store_id}/read-file")
 @router.post("/stores/{store_id}/read-file")
 def read_file_by_path(
     store_id: str,
@@ -1490,11 +1549,16 @@ def read_file_by_path(
         store = _load_store(db, store_id)
         if store is not None:
             answer = _route_answer_store_manager(
-                db=db, store_id=store_id, question=combined_question, days=days, use_shortcuts=True
+                db=db,
+                store_id=store_id,
+                question=combined_question,
+                shortcut_question=question.strip(),
+                days=days,
+                use_shortcuts=True,
             )
             result["answer"] = answer
 
-    return result
+    return _attach_runtime_context(store_id, db, result)
 
 
 def _route_answer_store_manager(
@@ -1502,13 +1566,16 @@ def _route_answer_store_manager(
     db: Session,
     store_id: str,
     question: str,
+    shortcut_question: str | None = None,
     days: int,
     use_shortcuts: bool,
 ) -> dict[str, Any]:
     from app.services.ai_assist import answer_assist_question
 
+    shortcut_input = (shortcut_question or question or "").strip()
+
     # 第一道：产品引导类问题（部署/平台/设置/装修入口）由 ai_assist 拦截
-    assisted = answer_assist_question(question, db=db, store=_load_store(db, store_id)) if use_shortcuts else None
+    assisted = answer_assist_question(shortcut_input, db=db, store=_load_store(db, store_id)) if use_shortcuts else None
     if assisted is not None:
         return {
             "conclusion": assisted.get("conclusion"),
@@ -1523,7 +1590,7 @@ def _route_answer_store_manager(
     # 第二道：POIE Intent — 目标类指令直接落库 Goal + WorkThread
     from app.services.poie import handle_user_intent
 
-    intent_hit = handle_user_intent(db, store_id, question) if use_shortcuts else None
+    intent_hit = handle_user_intent(db, store_id, shortcut_input) if use_shortcuts else None
     if intent_hit is not None:
         return intent_hit
 
@@ -1531,6 +1598,15 @@ def _route_answer_store_manager(
     from app.services.chief_agent import answer_as_chief
 
     return answer_as_chief(db, store_id, question, days=days).model_dump(mode="json")
+
+
+def _attach_runtime_context(store_id: str, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    from app.api.routes_runtime import _build_daily_plan_payload, _build_workspace_payload
+
+    result = dict(payload)
+    result["workspace"] = _build_workspace_payload(store_id, db)
+    result["daily_plan"] = _build_daily_plan_payload(store_id, db)
+    return result
 
 
 @router.post("/stores/{store_id}/refresh")
@@ -1686,6 +1762,42 @@ def mark_recommendation_no_effect(recommendation_id: str, db: Session = Depends(
     return {"id": rec.id, "status": rec.status, "experiment_id": experiment.id, "result": experiment.result}
 
 
+@router.get("/recommendations/{recommendation_id}/preview")
+def preview_recommendation(recommendation_id: str, db: Session = Depends(get_db)):
+    """P0-B: 执行预览——只读不写，产出 diff。"""
+    from app.services.execution_plan import build_change_plan
+
+    rec = db.get(Recommendation, recommendation_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    plan = build_change_plan(db, rec)
+    return {
+        "recommendation_id": rec.id,
+        "mode": plan.mode,
+        "action": plan.action,
+        "diff": [{"field": c.field, "before": c.before, "after": c.after} for c in plan.changes],
+        "detail": plan.detail,
+        "expected": plan.expected,
+        "reversible": plan.reversible,
+        "platform_sync_required": plan.platform_sync_required,
+        "confirm_hint": "确认后立即生效，可随时回滚" if plan.reversible else "确认后进入观察窗",
+    }
+
+
+@router.post("/recommendations/{recommendation_id}/rollback")
+def rollback_recommendation_route(recommendation_id: str, db: Session = Depends(get_db)):
+    """P0-B: 回滚已执行的系统内动作。"""
+    from app.services.execution_plan import rollback_recommendation
+
+    rec = db.get(Recommendation, recommendation_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    result = rollback_recommendation(db, rec)
+    db.commit()
+    db.refresh(rec)
+    return {"id": rec.id, **result}
+
+
 @router.post("/experiments/{experiment_id}/evaluate")
 def evaluate_experiment(
     experiment_id: str,
@@ -1717,26 +1829,107 @@ def evaluate_experiment(
     }
 
 
-_CONNECT_CODES: dict[str, dict[str, Any]] = {}
+@router.get("/stores/{store_id}/today-agenda")
+def get_today_agenda(
+    store_id: str,
+    db: Session = Depends(get_db),
+):
+    """WP4a: 今日决策流时间线——节律 + 已跑 phase + 未读通知。"""
+    from zoneinfo import ZoneInfo
 
+    from app.services.operating_rhythm import is_in_quiet_hours, resolve_store_rhythm
 
-def _connect_code_payload(code: str) -> dict[str, Any] | None:
-    payload = _CONNECT_CODES.get(code)
-    if payload is None:
-        return None
-    created_raw = payload.get("created_at")
-    expires_in = int(payload.get("expires_in_seconds") or 900)
-    try:
-        created_at = datetime.fromisoformat(str(created_raw))
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        created_at = datetime.now(timezone.utc)
-    age = (datetime.now(timezone.utc) - created_at).total_seconds()
-    if payload.get("status") == "pending" and age > expires_in:
-        payload["status"] = "expired"
-    remaining = max(0, int(expires_in - age)) if payload.get("status") == "pending" else 0
-    return {**payload, "expires_in_seconds": remaining}
+    store = _load_store(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    day = now.strftime("%Y-%m-%d")
+    hour = now.hour
+    rhythm = resolve_store_rhythm(db, store_id)
+
+    # 节律驱动的计划时刻
+    def _h(t: str) -> int:
+        return int(t.split(":", 1)[0])
+
+    lunch_start = _h(rhythm.lunch_peak_start)
+    dinner_start = _h(rhythm.dinner_peak_start)
+    schedule = [
+        ("night_learn", 2),
+        ("deep_review", 6),
+        ("morning_readiness", max(lunch_start - 2, 7)),
+        ("lunch_nba", lunch_start - 1),
+        ("lunch_protect", lunch_start),
+        ("lunch_review", _h(rhythm.lunch_peak_end)),
+        ("dinner_strategy", dinner_start - 1),
+        ("dinner_protect", dinner_start),
+        ("evening_review", _h(rhythm.dinner_peak_end)),
+    ]
+    schedule = [(p, h) for p, h in schedule if 0 <= h < 24]
+
+    # 查今日已跑标记
+    keys = {f"clock_run:{store_id}:{day}:{p}" for p, _ in schedule}
+    ran = {
+        row[0]
+        for row in db.execute(select(AppSetting.key).where(AppSetting.key.in_(keys))).all()
+    }
+
+    def _status(phase: str, at_hour: int) -> str:
+        marker = f"clock_run:{store_id}:{day}:{phase}"
+        if marker in ran:
+            return "done"
+        if at_hour == hour:
+            return "now"
+        if at_hour < hour:
+            return "missed"
+        return "upcoming"
+
+    phases = [
+        {
+            "phase": p,
+            "scheduled_hour": h,
+            "scheduled_time": f"{h:02d}:00",
+            "status": _status(p, h),
+            "in_quiet_hours": is_in_quiet_hours(rhythm, h) if p not in ("night_learn", "deep_review") else False,
+        }
+        for p, h in schedule
+    ]
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    notifications = (
+        db.execute(
+            select(Notification)
+            .where(
+                Notification.store_id == store_id,
+                Notification.created_at >= today_start,
+                Notification.read == False,  # noqa: E712
+            )
+            .order_by(Notification.created_at.desc())
+            .limit(10)
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "date": day,
+        "hour": hour,
+        "rhythm_source": rhythm.source,
+        "quiet_hours": rhythm.quiet_hours,
+        "phases": phases,
+        "unread_notifications": [
+            {
+                "id": n.id,
+                "type": n.notification_type,
+                "title": n.title,
+                "body": n.body,
+                "priority": n.priority,
+                "clock_phase": n.clock_phase,
+                "created_at": n.created_at,
+            }
+            for n in notifications
+        ],
+    }
 
 
 @router.post("/stores/{store_id}/connect-codes")
@@ -1745,50 +1938,20 @@ def create_mobile_connect_code(
     platform: str = Query(default="外卖平台"),
     db: Session = Depends(get_db),
 ):
-    from app.models.settings import PlatformConnection
+    from app.services.connect_codes import create_connect_code
 
     store = _load_store(db, store_id)
     if store is None:
         raise HTTPException(status_code=404, detail="store not found")
-    code = f"{datetime.now(timezone.utc).strftime('%H%M')}{store_id[-2:]}{len(_CONNECT_CODES) % 90 + 10}"
-    code = "".join(ch for ch in code if ch.isalnum())[-6:].upper()
-    if len(code) < 6:
-        code = f"{100000 + (len(_CONNECT_CODES) % 900000)}"
-    payload = {
-        "code": code,
-        "store_id": store_id,
-        "platform": platform,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "expires_in_seconds": 900,
-    }
-    _CONNECT_CODES[code] = payload
-    connection = db.execute(
-        select(PlatformConnection).where(
-            PlatformConnection.store_id == store_id,
-            PlatformConnection.platform == platform,
-        )
-    ).scalar_one_or_none()
-    if connection is None:
-        connection = PlatformConnection(
-            store_id=store_id,
-            platform=platform,
-            status="pending",
-            connector_mode="mobile",
-        )
-        db.add(connection)
-    else:
-        connection.status = "pending"
-        connection.connector_mode = "mobile"
-        db.add(connection)
-    db.commit()
-    return _connect_code_payload(code) or payload
+    return create_connect_code(db, store_id, platform)
 
 
 @router.get("/stores/{store_id}/connect-codes/{code}")
-def get_mobile_connect_code(store_id: str, code: str):
-    payload = _connect_code_payload(code)
-    if payload is None or payload.get("store_id") != store_id:
+def get_mobile_connect_code(store_id: str, code: str, db: Session = Depends(get_db)):
+    from app.services.connect_codes import get_connect_code
+
+    payload = get_connect_code(db, store_id, code)
+    if payload is None:
         raise HTTPException(status_code=404, detail="connect code not found")
     return payload
 
@@ -1810,7 +1973,7 @@ def list_platform_links(store_id: str, db: Session = Depends(get_db)):
                 "connector_mode": row.connector_mode,
                 "external_store_id": row.external_store_id,
                 "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
-                "connected_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
+                "connected_at": row.connected_at.isoformat() if row.connected_at else None,
             }
             for row in rows
         ],
@@ -1819,34 +1982,15 @@ def list_platform_links(store_id: str, db: Session = Depends(get_db)):
 
 @router.post("/stores/{store_id}/platform-links/{code}/confirm")
 def confirm_platform_link(store_id: str, code: str, db: Session = Depends(get_db)):
-    from app.models.settings import PlatformConnection
+    from app.services.connect_codes import confirm_connect_code
 
     store = _load_store(db, store_id)
     if store is None:
         raise HTTPException(status_code=404, detail="store not found")
-    payload = _CONNECT_CODES.get(code)
-    if payload is None or payload.get("store_id") != store_id:
+    result = confirm_connect_code(db, store_id, code, store)
+    if result.get("error") == "not_found":
         raise HTTPException(status_code=404, detail="connect code not found")
-    live = _connect_code_payload(code)
-    if live is not None and live.get("status") == "expired":
+    if result.get("error") == "expired":
         raise HTTPException(status_code=410, detail="connect code expired")
-    payload["status"] = "connected"
-    payload["connected_at"] = datetime.now(timezone.utc).isoformat()
-    platform = str(payload.get("platform") or "外卖平台")
-    connection = db.execute(
-        select(PlatformConnection).where(
-            PlatformConnection.store_id == store_id,
-            PlatformConnection.platform == platform,
-        )
-    ).scalar_one_or_none()
-    if connection is None:
-        connection = PlatformConnection(store_id=store_id, platform=platform)
-        db.add(connection)
-    connection.status = "connected"
-    connection.connector_mode = "mobile"
-    connection.last_sync_at = datetime.now(timezone.utc)
-    connection.last_error = None
-    db.add(connection)
-    db.commit()
     links = list_platform_links(store_id=store_id, db=db)["links"]
-    return {"store_id": store_id, "link": _connect_code_payload(code) or payload, "links": links}
+    return {"store_id": store_id, "link": result["link"], "links": links}

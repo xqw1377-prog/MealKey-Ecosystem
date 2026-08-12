@@ -19,7 +19,7 @@ class ChiefAgentResponse(BaseModel):
 
     question: str
     question_type: str = "general"  # diagnosis/competition/menu/product/review/growth/...
-    mode: str = "react"  # react | rule_fallback | heuristic
+    mode: str = "react"  # react | rule_fallback | heuristic | clarification
     conclusion: str = ""
     reasons: list[str] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
@@ -29,3 +29,5 @@ class ChiefAgentResponse(BaseModel):
     answer: str = ""  # 完整自然语言回答（前端可直接展示）
     llm: Optional[dict[str, Any]] = None  # provider/model/latency_ms/tokens/failover_used
     error: Optional[str] = None  # 降级时的错误原因（不抛给用户，记录观测）
+    decision: Optional[dict[str, Any]] = None  # 单一经营对象
+    execution_tier: Optional[str] = None  # draft | confirm | writeback

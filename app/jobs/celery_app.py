@@ -39,58 +39,17 @@ celery_app.conf.update(
                 minute=settings.daily_job_minute + 30,
             ),
         },
-        # === Daily Operating Clock（材料 §五 6 个经营节点）===
-        "morning-readiness-check": {
-            "task": "ops.operating_clock",
-            "args": ("morning_readiness",),
-            "schedule": crontab(hour=9, minute=30),  # 开业后：今日准备度检查
+        # WP1: 节律心跳 —— 每 30 分钟一次，逐店按自己的经营节律命中 phase
+        "rhythm-tick": {
+            "task": "ops.rhythm_tick",
+            "schedule": crontab(minute="*/30"),
         },
-        "lunch-nba": {
-            "task": "ops.operating_clock",
-            "args": ("lunch_nba",),
-            "schedule": crontab(hour=10, minute=30),  # 午高峰前：Next Best Action
-        },
-        "lunch-protect": {
-            "task": "ops.operating_clock",
-            "args": ("lunch_protect",),
-            "schedule": crontab(hour=11, minute=50),  # 午高峰：Protect Mode 实时监控
-        },
-        "lunch-review": {
-            "task": "ops.operating_clock",
-            "args": ("lunch_review",),
-            "schedule": crontab(hour=14, minute=0),  # 餐段复盘
-        },
-        "evening-light-review": {
-            "task": "ops.operating_clock",
-            "args": ("evening_review",),
-            "schedule": crontab(hour=21, minute=0),  # 晚间轻复盘
-        },
-        # V1 补全时段
-        "dinner-strategy": {
-            "task": "ops.operating_clock",
-            "args": ("dinner_strategy",),
-            "schedule": crontab(hour=16, minute=30),  # 晚餐前策略调整
-        },
-        "deep-review": {
-            "task": "ops.operating_clock",
-            "args": ("deep_review",),
-            "schedule": crontab(hour=6, minute=0),  # 次日凌晨数据完整后深度复盘
-        },
-        "night-learn": {
-            "task": "ops.operating_clock",
-            "args": ("night_learn",),
-            "schedule": crontab(hour=2, minute=0),  # 凌晨数据结算后回收实验+更新画像
-        },
-        # Weekly/Monthly Playbook（V1 §14-15）
-        "weekly-playbook": {
-            "task": "ops.operating_clock",
-            "args": ("weekly_playbook",),
-            "schedule": crontab(hour=7, minute=0, day_of_week=1),  # 每周一 7:00
-        },
-        "monthly-playbook": {
-            "task": "ops.operating_clock",
-            "args": ("monthly_playbook",),
-            "schedule": crontab(hour=7, minute=0, day_of_month=1),  # 每月 1 号 7:00
+        # 旧的全网硬编码 crontab 已废弃：operating_clock 仍保留供手动/测试调用
+
+        # WP3: 决策流跟进——每小时检查到期的 next_check_at
+        "follow-up-decisions": {
+            "task": "ops.follow_up_decisions",
+            "schedule": crontab(minute="*/60"),
         },
     },
 )

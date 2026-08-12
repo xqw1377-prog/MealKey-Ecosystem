@@ -332,6 +332,8 @@ def annotate_action_gates(
     unlock_ready: bool = True,
     blockers: list[str] | None = None,
     profit_state: Any = None,
+    system_mode: str = "operating",
+    strategy_memory: Any = None,
 ) -> list[AgentPriorityAction]:
     """Attach create_enabled / profit_gate flags for frontend + create guards."""
     from app.services.profit_gate import evaluate_profit_gate
@@ -349,10 +351,18 @@ def annotate_action_gates(
             create_block_reason = blockers[0] if blockers else "尚未解锁，先补齐前置条件。"
 
         if agent_key in {"promo", "ads"} and profit_state is not None:
+            memory_veto = None
+            if strategy_memory is not None:
+                for item in getattr(strategy_memory, "items", []) or []:
+                    if getattr(item, "action_type", "") == action.action_type and getattr(item, "result", "") == "negative":
+                        memory_veto = getattr(item, "avoid_when", None) or getattr(item, "lesson", None)
+                        break
             gate = evaluate_profit_gate(
                 profit_state,
                 action_type=action.action_type,
                 expected_order_lift_pct=float(action.expected_lift_pct_high or 0),
+                system_mode=system_mode,
+                memory_veto=memory_veto,
             )
             profit_allowed = gate.allowed
             profit_reason = gate.reason

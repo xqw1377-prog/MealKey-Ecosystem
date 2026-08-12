@@ -41,6 +41,30 @@ def test_mobile_connect_code_and_confirm_flow() -> None:
         row.get("platform") == "meituan" and row.get("status") == "connected"
         for row in links_after.json()["links"]
     )
+    connected_row = next(
+        row for row in links_after.json()["links"] if row.get("platform") == "meituan"
+    )
+    assert connected_row.get("connected_at")
+    assert connected_row.get("connected_at") != connected_row.get("last_sync_at") or connected_row.get(
+        "last_sync_at"
+    )
+
+
+def test_connect_code_survives_in_database() -> None:
+    seed = client.post("/dev/seed")
+    assert seed.status_code == 200
+    store_id = seed.json()["store_id"]
+    created = client.post(f"/workspace/stores/{store_id}/connect-codes", params={"platform": "eleme"})
+    code = created.json()["code"]
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.settings import ConnectCode
+
+    with SessionLocal() as db:
+        row = db.execute(select(ConnectCode).where(ConnectCode.code == code)).scalar_one()
+        assert row.store_id == store_id
+        assert row.status == "pending"
 
 
 def test_connect_code_not_found() -> None:

@@ -27,6 +27,7 @@ def evaluate_profit_gate(
     min_take_home_rate: float = 0.58,
     min_profit_per_order: float = 3.5,
     system_mode: str = "operating",
+    memory_veto: Optional[str] = None,
 ) -> ProfitGateDecision:
     """
     Example:
@@ -36,6 +37,14 @@ def evaluate_profit_gate(
     """
     current_thr = profit.take_home_rate
     current_ppo = profit.contribution_profit_per_order
+
+    if memory_veto:
+        return ProfitGateDecision(
+            allowed=False,
+            verdict="blocked_memory",
+            reason=f"策略记忆否决：{memory_veto}",
+            order_lift_pct=expected_order_lift_pct,
+        )
 
     # Safe Mode：MOS 未满足时禁止利润相关动作
     if system_mode == "safe":

@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./mealky.db"
     storestate_days: int = 7
     api_token: str = ""
+    # 多租户 JWT（生产务必单独配置 JWT_SECRET）
+    jwt_secret: str = ""
+    jwt_expire_minutes: int = 60 * 24 * 7
+    jwt_enforce_store_scope: bool = True
 
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"

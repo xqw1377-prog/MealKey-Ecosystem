@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.routes_auth import router as auth_router
 from app.api.routes_competition import router as competition_router
 from app.api.routes_dev import router as dev_router
 from app.api.routes_goal import router as goal_router
@@ -12,20 +13,30 @@ from app.api.routes_settings import router as settings_router
 from app.api.routes_speech import router as speech_router
 from app.api.routes_store import router as store_router
 from app.api.routes_workspace import router as workspace_router
+from app.core.config import settings
 
-router = APIRouter()
 
-router.include_router(store_router, prefix="/stores", tags=["stores"])
-router.include_router(
-    competition_router,
-    prefix="/stores",
-    tags=["competition"],
-)
-router.include_router(dev_router, prefix="/dev", tags=["dev"])
-router.include_router(goal_router, tags=["goals"])
-router.include_router(mue_router, tags=["understanding"])
-router.include_router(workspace_router, prefix="/workspace", tags=["workspace"])
-router.include_router(speech_router, prefix="/speech", tags=["speech"])
-router.include_router(settings_router, prefix="/settings", tags=["settings"])
-router.include_router(public_router, prefix="/public", tags=["public"])
-router.include_router(runtime_router, prefix="/v1", tags=["runtime"])
+def build_api_router() -> APIRouter:
+    """按当前环境动态组装路由（生产永不挂载 /dev）。"""
+    api = APIRouter()
+    api.include_router(auth_router, prefix="/auth", tags=["auth"])
+    api.include_router(store_router, prefix="/stores", tags=["stores"])
+    api.include_router(
+        competition_router,
+        prefix="/stores",
+        tags=["competition"],
+    )
+    if settings.is_dev:
+        api.include_router(dev_router, prefix="/dev", tags=["dev"])
+    api.include_router(goal_router, tags=["goals"])
+    api.include_router(mue_router, tags=["understanding"])
+    api.include_router(workspace_router, prefix="/workspace", tags=["workspace"])
+    api.include_router(speech_router, prefix="/speech", tags=["speech"])
+    api.include_router(settings_router, prefix="/settings", tags=["settings"])
+    api.include_router(public_router, prefix="/public", tags=["public"])
+    api.include_router(runtime_router, prefix="/v1", tags=["runtime"])
+    return api
+
+
+# 兼容旧 import：默认按当前 settings 构建一次
+router = build_api_router()

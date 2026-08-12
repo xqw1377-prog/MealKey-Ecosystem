@@ -104,7 +104,7 @@ def test_mos_not_satisfied_for_empty_understanding() -> None:
 def test_mos_satisfied_with_minimum_info() -> None:
     """填了关键信息后 MOS 应该满足。"""
     mu = _make_mu()
-    mu.store_profile = {"store_name": "测试店"}
+    mu.platform_connected = True
     mu.preferences.priority_style = "profit"
     mu.permissions.low_risk_auto_ok = True
     mu.constraints.lunch_capacity_per_hour = 100
@@ -123,12 +123,50 @@ def test_safe_mode_when_mos_not_satisfied() -> None:
 def test_operating_mode_when_mos_satisfied() -> None:
     """MOS 满足时 system_mode=operating。"""
     mu = _make_mu()
-    mu.store_profile = {"name": "店"}
+    mu.platform_connected = True
     mu.preferences.priority_style = "balanced"
     mu.permissions.low_risk_auto_ok = False  # 已确认（False 也算）
     mu.constraints.profit_floor_rate = 0.58
     mode = determine_system_mode(mu)
     assert mode == "operating"
+
+
+def test_risk_boundary_unconfirmed_blocks_mos() -> None:
+    """low_risk_auto_ok 未表态时风险边界不过 MOS。"""
+    mu = _make_mu()
+    mu.platform_connected = True
+    mu.preferences.priority_style = "profit"
+    mu.permissions.low_risk_auto_ok = None
+    mu.constraints.lunch_capacity_per_hour = 80
+    satisfied, blocking = check_mos(mu)
+    assert not satisfied
+    assert "risk_boundary" in blocking
+
+
+def test_store_profile_alone_does_not_count_as_platform() -> None:
+    """仅有店档不算平台已连接。"""
+    mu = _make_mu()
+    mu.store_profile = {"store_name": "测试店"}
+    mu.preferences.priority_style = "profit"
+    mu.permissions.low_risk_auto_ok = True
+    mu.constraints.lunch_capacity_per_hour = 80
+    satisfied, blocking = check_mos(mu)
+    assert not satisfied
+    assert "platform_connected" in blocking
+
+
+def test_gap_blocks_mos_maps_constraint_keys() -> None:
+    from app.services.mos_engine import gap_blocks_mos, update_mos_status
+
+    mu = _make_mu()
+    mu.platform_connected = True
+    mu.preferences.priority_style = "profit"
+    mu.permissions.low_risk_auto_ok = True
+    mu.open_gaps = ["lunch_capacity"]
+    mu = update_mos_status(mu)
+    assert "key_constraint" in mu.mos_blocking_fields
+    assert gap_blocks_mos("lunch_capacity", mu) is True
+    assert "lunch_capacity" in mu.mos_gap_keys
 
 
 def test_safe_mode_blocks_spend_actions() -> None:

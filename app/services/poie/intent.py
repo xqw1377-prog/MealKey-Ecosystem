@@ -184,14 +184,34 @@ def _handle_goal_intent(db: Session, store_id: str, question: str) -> Optional[d
 
 
 def handle_user_intent(db: Session, store_id: str, question: str) -> Optional[dict[str, Any]]:
-    """Pull 入口：先自然语言设置（MUE），再目标（Goal）。
+    """Pull 入口：先编译意图，再设置 / 目标 / 动作；编不成再交给店长。"""
+    from app.services.intent_compiler import compile_intent
+    from app.services.mue import handle_understanding_intent, load_understanding
 
-    都不是则返回 None → chief_agent。
-    """
-    from app.services.mue import handle_understanding_intent
+    compiled = compile_intent(question)
+    if compiled.kind in {"setting", "constraint"}:
+        mue_hit = handle_understanding_intent(db, store_id, question, key=list(compiled.slots.keys())[0] if compiled.slots else None)
+        if mue_hit is not None:
+            mue_hit["decision"] = compiled.to_decision()
+            return mue_hit
 
-    mue_hit = handle_understanding_intent(db, store_id, question)
-    if mue_hit is not None:
-        return mue_hit
+    if compiled.kind == "goal" and compiled.ready:
+        hit = _handle_goal_intent(db, store_id, question)
+        if hit is not None:
+            hit["decision"] = compiled.to_decision()
+            return hit
 
-    return _handle_goal_intent(db, store_id, question)
+    if compiled.kind == "action":
+        from app.services.action_executor import execute_compiled_action
+        from app.services.mos_engine import determine_system_mode
+
+        u = load_understanding(db, store_id)
+        return execute_compiled_action(
+            db,
+            store_id,
+            compiled,
+            system_mode=determine_system_mode(u),
+            low_risk_ok=u.permissions.low_risk_auto_ok,
+        )
+
+    return None

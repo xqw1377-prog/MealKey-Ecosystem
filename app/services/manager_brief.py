@@ -200,9 +200,52 @@ def _collect_results(db, store_id: str) -> list[BriefResult]:
                 experiment_id=item.source_experiment_id,
             )
         )
-        if len(results) >= 3:
-            break
-    return results
+
+    # P1-A: 附加预估-实际对账卡
+    try:
+        from app.models.ohre import Recommendation
+        from sqlalchemy import select as _select
+        import json as _json
+
+        recent_recs = db.execute(
+            _select(Recommendation)
+            .where(Recommendation.store_id == store_id)
+            .order_by(Recommendation.created_at.desc())
+            .limit(15)
+        ).scalars().all()
+        for rec in recent_recs:
+            content = {}
+            if rec.content_json:
+                try:
+                    content = _json.loads(rec.content_json)
+                except _json.JSONDecodeError:
+                    continue
+            verification = content.get("verification")
+            if not verification:
+                continue
+            expected = verification.get("expected_lift_pct", 0)
+            actual = verification.get("actual_lift_pct", 0)
+            verdict = verification.get("verdict", "unknown")
+            verdict_label = {"beat": "超出预期", "met": "达标", "partial": "部分达标", "missed": "未达标"}.get(verdict, "未知")
+            # 避免和 strategy_memory 的结果重复
+            if any(r.action_type == rec.action_type and r.lift_pct == actual for r in results):
+                continue
+            results.append(
+                BriefResult(
+                    title=f"预估 +{expected:.0f}% → 实际 {actual:+.1f}%（{verdict_label}）",
+                    outcome="positive" if verdict in ("beat", "met") else "neutral" if verdict == "partial" else "negative",
+                    detail=f"「{rec.action_type}」预估提升 {expected:.0f}%，实际 {actual:+.1f}%。归因质量：{verification.get('attribution_quality', 'medium')}",
+                    action_type=rec.action_type,
+                    lift_pct=actual,
+                    recommendation_id=rec.id,
+                )
+            )
+            if len(results) >= 6:
+                break
+    except Exception:  # noqa: BLE001
+        pass
+
+    return results[:6]
 
 
 def _build_parallel_notes(

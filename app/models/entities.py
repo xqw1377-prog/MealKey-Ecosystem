@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.time import utc_now
 from app.db.base import Base
 from app.models.common import IdMixin, TimestampMixin
 
@@ -90,7 +91,7 @@ class MenuItemVersion(IdMixin, Base):
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     item: Mapped["MenuItem"] = relationship(
@@ -193,7 +194,7 @@ class CompetitorSnapshot(IdMixin, Base):
     __tablename__ = "competitor_snapshot"
 
     c_store_id: Mapped[str] = mapped_column(ForeignKey("competitor_store.id"))
-    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     review_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     price_band_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -219,7 +220,7 @@ class CompetitionCollectionRun(IdMixin, Base):
     status: Mapped[str] = mapped_column(String(24), default="running")
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utc_now,
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
@@ -243,7 +244,7 @@ class CompetitorRawPayload(IdMixin, Base):
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utc_now,
     )
     payload_json: Mapped[str] = mapped_column(Text)
     checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -266,9 +267,9 @@ class StoreCompetitorWatch(IdMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utc_now,
     )
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utc_now,
     )

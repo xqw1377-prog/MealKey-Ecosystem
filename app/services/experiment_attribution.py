@@ -180,6 +180,32 @@ def evaluate_experiment(
     experiment.notes = f"{metric_name}（{scope_label}）{note}"
     db.add(experiment)
 
+    # P1-A: 回写预估-实际对账数据到 recommendation
+    try:
+        rec = db.get(Recommendation, experiment.recommendation_id)
+        if rec:
+            import json as _json
+            content = _loads_dict(rec.content_json)
+            expected_high = float(rec.expected_lift_pct_high or 0)
+            actual_lift = float(lift_pct) if lift_pct is not None else 0.0
+            if expected_high > 0 and actual_lift >= expected_high * 0.8:
+                verdict = "beat" if actual_lift >= expected_high else "met"
+            elif actual_lift > 0:
+                verdict = "partial"
+            else:
+                verdict = "missed"
+            content["verification"] = {
+                "expected_lift_pct": expected_high,
+                "actual_lift_pct": round(actual_lift, 1),
+                "verdict": verdict,
+                "attribution_quality": attribution_quality,
+                "metric": metric_name,
+            }
+            rec.content_json = _json.dumps(content, ensure_ascii=False)
+            db.add(rec)
+    except Exception:  # noqa: BLE001
+        pass
+
     # 同步沉淀策略记忆（upsert 内部会 commit，这里保持原行为）
     try:
         upsert_strategy_memory_from_experiment(db, experiment)

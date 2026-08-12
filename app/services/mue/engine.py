@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.merchant_understanding import MerchantUnderstandingRecord
@@ -25,6 +26,7 @@ from app.services.mue.bootstrap import (
     gap_question,
 )
 from app.services.mue.nl_update import apply_nl_update
+from app.services.mos_engine import update_mos_status
 
 
 def _dumps(obj: Any) -> str:
@@ -61,13 +63,7 @@ def _record_to_view(rec: MerchantUnderstandingRecord) -> MerchantUnderstanding:
     )
 
 
-def _save(db: Session, view: MerchantUnderstanding) -> MerchantUnderstanding:
-    rec = db.execute(
-        select(MerchantUnderstandingRecord).where(MerchantUnderstandingRecord.store_id == view.store_id)
-    ).scalar_one_or_none()
-    if rec is None:
-        rec = MerchantUnderstandingRecord(store_id=view.store_id)
-        db.add(rec)
+def _apply_view_to_record(rec: MerchantUnderstandingRecord, view: MerchantUnderstanding) -> None:
     rec.onboarding_stage = view.onboarding_stage
     rec.store_profile_json = _dumps(view.store_profile)
     rec.inferred_json = _dumps([f.model_dump(mode="json") for f in view.inferred])
@@ -76,7 +72,72 @@ def _save(db: Session, view: MerchantUnderstanding) -> MerchantUnderstanding:
     rec.permissions_json = _dumps(view.permissions)
     rec.open_gaps_json = _dumps(view.open_gaps)
     rec.last_interview_key = view.last_interview_key
-    db.commit()
+
+
+def _refresh_platform_flag(db: Session, view: MerchantUnderstanding) -> MerchantUnderstanding:
+    from app.models.settings import PlatformConnection
+
+    connected = db.execute(
+        select(PlatformConnection.id)
+        .where(
+            PlatformConnection.store_id == view.store_id,
+            PlatformConnection.status == "connected",
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    view.platform_connected = connected is not None
+    if view.platform_connected:
+        view.store_profile = {**view.store_profile, "platform_connected": True}
+    return view
+
+
+def light_agents_for_store(db: Session, store_id: str) -> Any | None:
+    """访谈/理解刷新用的轻量 agents：只带门店档案，不跑 13 个专业 agent。"""
+    from types import SimpleNamespace
+
+    from app.models.entities import Store
+
+    store = db.execute(select(Store).where(Store.id == store_id)).scalar_one_or_none()
+    if store is None:
+        return None
+    store_view = SimpleNamespace(
+        name=store.name,
+        city=store.city,
+        area=store.area,
+        category=None,
+        primary_audience=store.primary_audience,
+    )
+    state = SimpleNamespace(
+        store=store_view,
+        store_name=store.name,
+        city=store.city,
+        area=store.area,
+        category=None,
+        kpis={},
+        profit=None,
+    )
+    return SimpleNamespace(store_state=state)
+
+
+def _save(db: Session, view: MerchantUnderstanding) -> MerchantUnderstanding:
+    view = update_mos_status(view)
+    rec = db.execute(
+        select(MerchantUnderstandingRecord).where(MerchantUnderstandingRecord.store_id == view.store_id)
+    ).scalar_one_or_none()
+    if rec is None:
+        rec = MerchantUnderstandingRecord(store_id=view.store_id)
+        db.add(rec)
+    _apply_view_to_record(rec, view)
+    try:
+        db.commit()
+    except IntegrityError:
+        # 并发初始化同一家店时，退回到读取已存在记录并覆盖更新。
+        db.rollback()
+        rec = db.execute(
+            select(MerchantUnderstandingRecord).where(MerchantUnderstandingRecord.store_id == view.store_id)
+        ).scalar_one()
+        _apply_view_to_record(rec, view)
+        db.commit()
     db.refresh(rec)
     view.updated_at = datetime.now(timezone.utc)
     view.known_count = len(view.store_profile)
@@ -89,8 +150,11 @@ def load_understanding(db: Session, store_id: str) -> MerchantUnderstanding:
         select(MerchantUnderstandingRecord).where(MerchantUnderstandingRecord.store_id == store_id)
     ).scalar_one_or_none()
     if rec is None:
-        return empty_shell(store_id)
-    return _record_to_view(rec)
+        view = empty_shell(store_id)
+    else:
+        view = _record_to_view(rec)
+    _refresh_platform_flag(db, view)
+    return update_mos_status(view)
 
 
 def ensure_understanding(
@@ -102,6 +166,7 @@ def ensure_understanding(
     """读取 + 用平台已知信息刷新 A/B，并持久化。"""
     existing = load_understanding(db, store_id)
     view = bootstrap_understanding(store_id, agents=agents, existing=existing)
+    _refresh_platform_flag(db, view)
     return _save(db, view)
 
 
@@ -124,19 +189,55 @@ def next_interview_question(understanding: MerchantUnderstanding) -> GapQuestion
     return None
 
 
+def _interview_payload(
+    u: MerchantUnderstanding,
+    *,
+    q: GapQuestion | None = None,
+    intent: str,
+    mode: str,
+    question_type: str,
+    answer: str,
+    conclusion: str,
+    actions: list[str] | None = None,
+    expected: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    u = update_mos_status(u)
+    payload: dict[str, Any] = {
+        "conclusion": conclusion,
+        "actions": actions or (q.options if q and q.options else ["直接用一句话说清楚就行"]),
+        "expected": expected,
+        "confidence": "high",
+        "answer": answer,
+        "intent": intent,
+        "mode": mode,
+        "gap_key": q.key if q else None,
+        "question": q.question if q else None,
+        "options": list(q.options) if q and q.options else [],
+        "question_type": question_type,
+        "understanding": u.model_dump(mode="json"),
+        "accepted": True,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
 def begin_interview_turn(db: Session, store_id: str, *, agents: Any | None = None) -> dict[str, Any]:
     """返回下一道访谈题（供 ask / 首页 need_input）。"""
     u = ensure_understanding(db, store_id, agents=agents)
     q = next_interview_question(u)
     if q is None:
-        return {
-            "conclusion": "店的情况我已经够用来开始经营了。",
-            "actions": ["我会持续盯数据，需要你时再找你"],
-            "answer": "店的情况我已经够用来开始经营了。需要你时我会出现在「现在需要你」。",
-            "intent": "understanding_ready",
-            "mode": "mue_interview",
-            "understanding": u.model_dump(mode="json"),
-        }
+        return _interview_payload(
+            u,
+            intent="understanding_ready",
+            mode="mue_interview",
+            question_type="mue_ready",
+            answer="店的情况我已经够用来开始经营了。需要你时我会出现在「现在需要你」。",
+            conclusion="店的情况我已经够用来开始经营了。",
+            actions=["我会持续盯数据，需要你时再找你"],
+            expected="需要你时我会出现在「现在需要你」",
+        )
     u.last_interview_key = q.key
     _save(db, u)
 
@@ -151,19 +252,16 @@ def begin_interview_turn(db: Session, store_id: str, *, agents: Any | None = Non
         opts = "\n" + "\n".join(f"{chr(65+i)}. {o}" for i, o in enumerate(q.options))
 
     answer = f"{lead}\n\n{q.context}\n\n**{q.question}**{opts}"
-    return {
-        "conclusion": q.question,
-        "actions": q.options or ["直接用一句话说清楚就行"],
-        "expected": "你答完我会记住，并继续下一项或开始经营",
-        "confidence": "high",
-        "answer": answer,
-        "intent": "understanding_interview",
-        "mode": "mue_interview",
-        "gap_key": q.key,
-        "question": q.question,
-        "question_type": "mue_gap",
-        "understanding": u.model_dump(mode="json"),
-    }
+    return _interview_payload(
+        u,
+        q=q,
+        intent="understanding_interview",
+        mode="mue_interview",
+        question_type="mue_gap",
+        answer=answer,
+        conclusion=q.question,
+        expected="你答完我会记住，并继续下一项或开始经营",
+    )
 
 
 def handle_understanding_intent(
@@ -172,35 +270,38 @@ def handle_understanding_intent(
     question: str,
     *,
     agents: Any | None = None,
+    key: str | None = None,
 ) -> Optional[dict[str, Any]]:
     """设置 / 偏好 / 权限类原话 → 更新理解；非此类返回 None。"""
     u = ensure_understanding(db, store_id, agents=agents)
+    gap_key = str(key or "").strip() or u.last_interview_key
+    if gap_key:
+        u.last_interview_key = gap_key
     result = apply_nl_update(u, question)
     if result is None:
         return None
     saved = _save(db, result.understanding)
     next_q = next_interview_question(saved)
     follow = ""
-    if next_q and saved.onboarding_stage == "interview":
+    if next_q and (saved.onboarding_stage == "interview" or not saved.mos_satisfied):
         follow = f"\n\n还有一件：{next_q.question}"
         saved.last_interview_key = next_q.key
-        _save(db, saved)
-    elif saved.onboarding_stage == "operating":
+        saved = _save(db, saved)
+    elif saved.mos_satisfied or saved.onboarding_stage == "operating":
         follow = "\n\n好了，我按这个继续管。需要你时再找你。"
 
-    return {
-        "conclusion": result.reply.split("\n")[0],
-        "actions": [f"已更新：{k}" for k in result.changed_keys],
-        "expected": "偏好会直接影响后续经营与打扰策略",
-        "confidence": "high",
-        "answer": result.reply + follow,
-        "intent": "understanding_update",
-        "mode": "mue_update",
-        "changed_keys": result.changed_keys,
-        "question": question,
-        "question_type": "mue_nl_setting",
-        "understanding": saved.model_dump(mode="json"),
-    }
+    return _interview_payload(
+        saved,
+        q=next_q,
+        intent="understanding_update",
+        mode="mue_update",
+        question_type="mue_nl_setting",
+        answer=result.reply + follow,
+        conclusion=result.reply.split("\n")[0],
+        actions=[f"已更新：{k}" for k in result.changed_keys],
+        expected="偏好会直接影响后续经营与打扰策略",
+        extra={"changed_keys": result.changed_keys},
+    )
 
 
 def understanding_gap_candidate(understanding: MerchantUnderstanding) -> Optional[dict[str, Any]]:

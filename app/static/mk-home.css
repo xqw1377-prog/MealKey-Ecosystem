@@ -2672,8 +2672,10 @@ body.view-home .mk-chat-bubble.assistant {
 }
 
 body.view-home .mk-chat-bubble.user {
-  background: var(--mk-accent);
-  color: #fff;
+  background: transparent;
+  color: var(--mk-ink);
+  border: 0;
+  box-shadow: none;
 }
 
 body.view-home .mk-chat-bubble strong {
@@ -2874,15 +2876,36 @@ body.view-home .mk-decision-card .mk-cta {
 .profile-avatar-preview.has-photo,
 .profile-avatar.has-photo,
 #sidebarOwnerAvatar.has-photo {
+  background-color: transparent;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   color: transparent;
+  font-size: 0;
 }
 
 .mk-appbar-actions .mk-avatar {
+  position: relative;
   cursor: pointer;
   overflow: hidden;
+}
+
+.mk-appbar-actions .mk-avatar .mk-avatar-photo,
+.profile-avatar-preview .mk-avatar-photo,
+#sidebarOwnerAvatar .mk-avatar-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: none;
+}
+
+.mk-appbar-actions .mk-avatar.has-photo .mk-avatar-photo,
+.profile-avatar-preview.has-photo .mk-avatar-photo,
+#sidebarOwnerAvatar.has-photo .mk-avatar-photo {
+  display: block;
 }
 
 .profile-modal {

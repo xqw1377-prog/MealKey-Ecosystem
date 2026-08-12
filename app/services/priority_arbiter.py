@@ -55,6 +55,48 @@ def score_interrupt(
     return round(_clamp(raw * 100), 2)
 
 
+# WP5: 打扰分学习——越用越懂老板
+def resolve_disturb_cost(db, store_id: str, card_type: str = "default") -> float:
+    """从老板的采纳/忽略行为学习打扰成本。
+
+    近30天该类型卡：采纳率高 → cost 降（多推）；连续忽略 → cost 升（少推）。
+    边界 [0.35, 0.9]，默认 0.55。
+    """
+    try:
+        from sqlalchemy import select, func
+        from app.models.ohre import Recommendation
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        # 统计近30天采纳 vs 忽略
+        total = db.execute(
+            select(func.count(Recommendation.id)).where(
+                Recommendation.store_id == store_id,
+                Recommendation.created_at >= cutoff,
+            )
+        ).scalar_one()
+
+        if total == 0:
+            return 0.55
+
+        adopted = db.execute(
+            select(func.count(Recommendation.id)).where(
+                Recommendation.store_id == store_id,
+                Recommendation.created_at >= cutoff,
+                Recommendation.status.in_(("adopted", "executed")),
+            )
+        ).scalar_one()
+
+        adoption_rate = adopted / total
+
+        # 采纳率高 → cost 降（多推）；低 → cost 升（少推）
+        # 映射：adoption_rate 0.0→0.9, 0.5→0.55, 1.0→0.35
+        cost = 0.9 - adoption_rate * 0.55
+        return round(max(0.35, min(0.9, cost)), 2)
+    except Exception:  # noqa: BLE001
+        return 0.55
+
+
 def map_event_state(event: OperatingEvent) -> str:
     decision = event.manager_decision or "record"
     if decision in {"ignore"}:
@@ -66,7 +108,7 @@ def map_event_state(event: OperatingEvent) -> str:
     return "noop"
 
 
-def _event_card(event: OperatingEvent) -> DecisionCard | None:
+def _event_card(event: OperatingEvent, *, disturb_cost: float = 0.55) -> DecisionCard | None:
     state = map_event_state(event)
     if state == "noop":
         return None
@@ -81,7 +123,7 @@ def _event_card(event: OperatingEvent) -> DecisionCard | None:
         urgency=urgency,
         confidence=event.confidence or 0.7,
         need_human=need_human,
-        disturb_cost=0.35 if event.manager_decision == "alert_owner" else 0.55,
+        disturb_cost=0.35 if event.manager_decision == "alert_owner" else disturb_cost,
     )
     # 低于门槛：知道但不打扰
     if priority < 42 and event.manager_decision != "alert_owner":
@@ -136,6 +178,7 @@ def _primary_experiment_card(
     primary: PrimaryExperimentBrief | None,
     *,
     brief: ManagerHomeBrief,
+    disturb_cost: float = 0.55,
 ) -> DecisionCard | None:
     if not primary or not primary.title:
         return None
@@ -192,7 +235,7 @@ def _primary_experiment_card(
         )
 
     # 待确认
-    priority = score_interrupt(value=0.85, urgency=0.7, confidence=0.75, need_human=0.9, disturb_cost=0.4)
+    priority = score_interrupt(value=0.85, urgency=0.7, confidence=0.75, need_human=0.9, disturb_cost=disturb_cost)
     why = brief.top_problem_detail or brief.business_judgment or "今天最值得推进的一件事已经准备好。"
     return DecisionCard(
         id=f"exp-confirm:{primary.recommendation_id or primary.title}",
@@ -358,10 +401,10 @@ def _result_cards(memory: StrategyMemorySnapshot | None) -> list[DecisionCard]:
     return cards
 
 
-def _opportunity_card(brief: ManagerHomeBrief) -> DecisionCard | None:
+def _opportunity_card(brief: ManagerHomeBrief, *, disturb_cost: float = 0.55) -> DecisionCard | None:
     if not brief.top_opportunity_title:
         return None
-    priority = score_interrupt(value=0.65, urgency=0.45, confidence=0.65, need_human=0.35, disturb_cost=0.7)
+    priority = score_interrupt(value=0.65, urgency=0.45, confidence=0.65, need_human=0.35, disturb_cost=disturb_cost)
     if priority < 28:
         return None
     return DecisionCard(
@@ -489,18 +532,19 @@ def build_ops_queue(
     opportunities: list[DecisionCard] = []
     noop = 0
 
+    base_disturb_cost = resolve_disturb_cost(db, store_id) if db is not None and store_id else 0.55
     if events:
         for event in events.events:
             if event.status in {"ignored", "resolved"}:
                 noop += 1
                 continue
-            card = _event_card(event)
+            card = _event_card(event, disturb_cost=base_disturb_cost)
             if card is None:
                 noop += 1
                 continue
             need_you.append(card)
 
-    primary_card = _primary_experiment_card(brief.primary_experiment, brief=brief)
+    primary_card = _primary_experiment_card(brief.primary_experiment, brief=brief, disturb_cost=base_disturb_cost)
     if primary_card:
         if primary_card.queue_bucket == "working":
             working.append(primary_card)
@@ -515,15 +559,15 @@ def build_ops_queue(
             working.append(card)
 
     results.extend(_result_cards(strategy_memory))
-    opp = _opportunity_card(brief)
+    opp = _opportunity_card(brief, disturb_cost=base_disturb_cost)
     if opp:
         opportunities.append(opp)
 
-    # 排序：高优先级在前；need_you 最多保留 3 张（少打扰）
+    # 排序：高优先级在前；need_you 只保留 1 张 NBA（少打扰）
     need_you.sort(key=lambda c: c.priority_score, reverse=True)
-    filtered = max(0, len(need_you) - 3)
+    filtered = max(0, len(need_you) - 1)
     noop += filtered
-    need_you = need_you[:3]
+    need_you = need_you[:1]
     working = working[:6]
     results = results[:4]
     opportunities = opportunities[:2]

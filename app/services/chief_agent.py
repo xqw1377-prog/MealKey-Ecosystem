@@ -24,15 +24,27 @@ import json
 import logging
 from typing import Any, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.schemas.chief_agent import ChiefAgentResponse
 from app.services.llm_engine.gateway import call_llm, is_llm_configured
 
+# 涉及金钱/补贴/投流的动作，必须问清预算和利润底线
+_SPEND_ACTIONS = {
+    "boost_hero_item_ads",
+    "adjust_ad_budget",
+    "join_lunch_campaign",
+    "match_competitor_promo",
+    "store_discount",
+    "launch_value_bundle_promo",
+    "run_platform_promo",
+}
+
 logger = logging.getLogger(__name__)
 
-# ReAct 循环上限（防止 LLM 反复调工具不收敛）
-_MAX_REACT_ROUNDS = 5
+# ReAct 循环上限：首轮 1 个工具 + 一轮收尾
+_MAX_REACT_ROUNDS = 2
 # 单条 tool 结果的最大长度（防止 context 爆炸）
 _TOOL_RESULT_MAX_CHARS = 3000
 
@@ -175,11 +187,16 @@ WRITE_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 
-def _build_tools_schema() -> list[dict[str, Any]]:
-    """构建 OpenAI function calling 格式的 tools 定义（query 只读 + write 写入）。"""
+def _build_tools_schema(allowed_query: str | None = None) -> list[dict[str, Any]]:
+    """构建 OpenAI function calling 格式的 tools 定义（query 只读 + write 写入）。
+
+    allowed_query：首轮只暴露这一个查询工具，避免一次调度一打部门。
+    """
     tools = []
-    # 只读 query 工具（无参数）
-    for name, info in AGENT_TOOLS.items():
+    query_items = AGENT_TOOLS.items()
+    if allowed_query and allowed_query in AGENT_TOOLS:
+        query_items = [(allowed_query, AGENT_TOOLS[allowed_query])]
+    for name, info in query_items:
         tools.append(
             {
                 "type": "function",
@@ -194,7 +211,6 @@ def _build_tools_schema() -> list[dict[str, Any]]:
                 },
             }
         )
-    # 写入工具（有参数）
     for name, info in WRITE_TOOLS.items():
         tools.append(
             {
@@ -313,12 +329,46 @@ def _call_specialist_agent(
 
     try:
         result = build_single_agent_cached(
-            db, ctx.store.id, agent_key, ctx=ctx, use_cache=False
+            db, ctx.store.id, agent_key, ctx=ctx, use_cache=True
         )
         return result
     except Exception as exc:  # noqa: BLE001
         logger.warning("specialist agent %s failed: %s", agent_key, exc)
         return {"error": f"agent {agent_key} failed: {type(exc).__name__}"}
+
+
+def _clarify(
+    db: Session,
+    store_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    missing_slots: list[dict[str, str]],
+    prefix: str,
+) -> dict[str, Any]:
+    """缺槽位时把未完成意图暂存，并返回统一澄清结构。"""
+    from app.models.settings import AppSetting
+
+    key = f"pending_intent:{store_id}"
+    payload = {
+        "tool": tool_name,
+        "arguments": arguments,
+        "missing_slots": missing_slots,
+        "pending_intent_key": key,
+    }
+    existing = db.execute(select(AppSetting).where(AppSetting.key == key)).scalar_one_or_none()
+    if existing:
+        existing.value = json.dumps(payload, ensure_ascii=False)
+    else:
+        db.add(AppSetting(key=key, value=json.dumps(payload, ensure_ascii=False)))
+    db.commit()
+    return {
+        "ok": False,
+        "tool": tool_name,
+        "needs_clarification": True,
+        "pending_intent_key": key,
+        "missing_slots": missing_slots,
+        "message": prefix + " ".join(s["question"] for s in missing_slots),
+    }
 
 
 def _execute_write_tool(
@@ -335,11 +385,25 @@ def _execute_write_tool(
             from app.schemas.goal import GoalCreateRequest
             from app.services.goal_engine import create_goal
 
+            raw_text = arguments.get("raw_text", "")
+            metric = arguments.get("metric", "custom")
+            target_value = arguments.get("target_value")
+            deadline = arguments.get("deadline")
+
+            # P0-A: slot 澄清——缺关键字段时先问，不急着落库
+            missing_slots = []
+            if not raw_text:
+                missing_slots.append({"slot": "raw_text", "question": "你想做到什么？用一句话告诉我。"})
+            if not target_value:
+                missing_slots.append({"slot": "target_value", "question": "具体目标是多少？（如 20 万、300 单、前三名）"})
+            if missing_slots:
+                return _clarify(db, store_id, "create_goal", arguments, missing_slots, "在创建目标之前，我需要先确认：")
+
             request = GoalCreateRequest(
-                raw_text=arguments.get("raw_text", ""),
-                metric=arguments.get("metric", "custom"),
-                target_value=arguments.get("target_value"),
-                deadline=arguments.get("deadline"),
+                raw_text=raw_text,
+                metric=metric,
+                target_value=target_value,
+                deadline=deadline,
             )
             goal = create_goal(db, store_id, request)
             return {
@@ -357,6 +421,20 @@ def _execute_write_tool(
             object_name = arguments.get("object_name", "")
             detail = arguments.get("detail", "")
             expected_metric = arguments.get("expected_metric", "orders")
+
+            # P0-A: slot 澄清——缺关键字段时先问（含业务槽位）
+            missing_slots = []
+            if not action_type or action_type == "custom":
+                missing_slots.append({"slot": "action_type", "question": "你希望我具体做什么？（如换主图、调广告预算、上套餐）"})
+            elif action_type in _SPEND_ACTIONS:
+                if not arguments.get("budget"):
+                    missing_slots.append({"slot": "budget", "question": "你打算投入多少预算？（如 500 元/天）"})
+                if not arguments.get("profit_floor"):
+                    missing_slots.append({"slot": "profit_floor", "question": "利润率底线是多少？（低于多少你宁可不做）"})
+            if not object_name:
+                missing_slots.append({"slot": "object_name", "question": "对哪个商品或哪个方面操作？"})
+            if missing_slots:
+                return _clarify(db, store_id, "prepare_action", arguments, missing_slots, "在准备动作之前，我需要确认：")
 
             rec = Recommendation(
                 store_id=store_id,
@@ -445,8 +523,10 @@ def _parse_final_answer(content: str) -> dict[str, Any]:
             return {
                 "conclusion": str(data.get("conclusion") or data.get("summary") or ""),
                 "reasons": list(data.get("reasons") or data.get("because") or [])[:3],
-                "actions": list(data.get("actions") or data.get("todo") or [])[:3],
+                "actions": list(data.get("actions") or data.get("todo") or [])[:1],
                 "expected": str(data.get("expected") or data.get("impact") or ""),
+                "object_name": str(data.get("object_name") or ""),
+                "action_type": str(data.get("action_type") or ""),
             }
     except json.JSONDecodeError:
         pass
@@ -457,30 +537,53 @@ def _parse_final_answer(content: str) -> dict[str, Any]:
     return {"conclusion": conclusion, "actions": actions, "answer": text}
 
 
+def _memory_lines(db: Session, store_id: str) -> str:
+    try:
+        from app.services.strategy_memory import load_strategy_memory
+
+        snap = load_strategy_memory(db, store_id, limit=8)
+    except Exception:  # noqa: BLE001
+        return ""
+    bits: list[str] = []
+    for item in snap.items[:5]:
+        mark = "可复用" if item.result == "positive" else "避免" if item.result == "negative" else item.result
+        bits.append(f"- [{mark}] {item.action_type}：{item.lesson}")
+    if not bits:
+        return ""
+    return "本店策略记忆：\n" + "\n".join(bits)
+
+
 def _react_loop(
     db: Session,
     ctx: Any,
     question: str,
+    *,
+    allowed_query: str | None = None,
+    memory_prompt: str = "",
 ) -> tuple[dict[str, Any], list[str], Optional[dict[str, Any]]]:
     """ReAct 多轮调度。返回 (parsed_answer, agents_called, llm_meta)。
 
     若 LLM 不支持 tools 或调用失败，抛 RuntimeError 由上层降级。
     """
     system = (
-        "你是 MealKey AI 店长，服务中国外卖门店老板。你是运营总监，下面有 13 个专业 agent 部门。\n"
-        "回答老板问题时，先调用必要的专业 agent 工具获取事实，再综合输出。\n"
+        "你是 MealKey AI 店长，服务中国外卖门店老板。每次只推进一件经营对象。\n"
+        "先调用与问题最相关的 1 个专业工具拿事实，再输出唯一决策。\n"
         "规则：\n"
-        "1. 只调用与问题相关的 agent（通常 1-3 个够用）；\n"
-        "2. 拿到 agent 结果后，用老板听得懂的话总结，像资深运营经理；\n"
-        "3. 最终回答必须输出 JSON：\n"
-        '   {"conclusion":"一句话结论","reasons":["依据1","依据2"],"actions":["今天先做X"],"expected":"预计影响"}\n'
-        "4. 不要编造 agent 没提供的数据；不要说「根据数据分析」，直接说结论。"
+        "1. 通常只调用 1 个 query 工具；不要一次叫多个部门；\n"
+        "2. 用老板听得懂的话，像资深运营经理；\n"
+        "3. 最终必须输出 JSON：\n"
+        '   {"conclusion":"一句话结论","reasons":["依据1"],"actions":["今天先做这一件"],'
+        '"expected":"预计影响","object_name":"对象","action_type":"动作类型"}\n'
+        "4. 不要编造工具没提供的数据；数字必须来自工具。\n"
+        "5. 若策略记忆写着同类动作为负，不要再建议同一动作。"
     )
+    if memory_prompt:
+        system += "\n" + memory_prompt
     messages = [
         {"role": "system", "content": system},
-        {"role": "user", "content": f"老板问题：{question}"},
+        {"role": "user", "content": f"老板问题：{question}\n请只推进一件事。"},
     ]
-    tools = _build_tools_schema()
+    tools = _build_tools_schema(allowed_query)
     agents_called: list[str] = []
     llm_meta: Optional[dict[str, Any]] = None
 
@@ -533,6 +636,23 @@ def _react_loop(
                 arguments = {}
             is_write_tool = tool_name in WRITE_TOOLS
             agent_result = _call_specialist_agent(db, ctx, tool_name, arguments if is_write_tool else None)
+            if agent_result is not None and agent_result.get("needs_clarification"):
+                # P0-A: 缺槽位时直接返回澄清，不再继续 ReAct
+                return (
+                    {
+                        "conclusion": agent_result["message"],
+                        "answer": agent_result["message"],
+                        "clarification": {
+                            "tool": agent_result["tool"],
+                            "pending_intent_key": agent_result["pending_intent_key"],
+                            "missing_slots": agent_result["missing_slots"],
+                            "message": agent_result["message"],
+                        },
+                        "needs_clarification": True,
+                    },
+                    [f"write:{tool_name}"],
+                    llm_meta,
+                )
             if agent_result is not None:
                 # 记录调用了哪些工具
                 if is_write_tool:
@@ -611,7 +731,7 @@ def _rule_fallback(
 
     try:
         result = build_single_agent_cached(
-            db, ctx.store.id, intent, ctx=ctx, use_cache=False
+            db, ctx.store.id, intent, ctx=ctx, use_cache=True
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("rule_fallback agent %s failed: %s", intent, exc)
@@ -620,7 +740,7 @@ def _rule_fallback(
     if result is None:
         # 最终兜底：growth agent 的 today_priority
         try:
-            growth = build_single_agent_cached(db, ctx.store.id, "growth", ctx=ctx, use_cache=False)
+            growth = build_single_agent_cached(db, ctx.store.id, "growth", ctx=ctx, use_cache=True)
             priority = (growth or {}).get("today_priority") or "先执行今日主动作并观察核心指标。"
         except Exception:  # noqa: BLE001
             priority = "数据暂不足，建议先补齐门店资料后再诊断。"
@@ -681,9 +801,11 @@ def answer_as_chief(
     *,
     days: int = 7,
 ) -> ChiefAgentResponse:
-    """店长 agent 主入口。接问题 → ReAct/降级 → 统一回答。"""
+    """店长 agent 主入口。先编译意图，再 ReAct/降级 → 单决策卡。"""
     from app.services.agent_context_cache import get_context
+    from app.services.intent_compiler import compile_intent, first_query_tool_for
 
+    compiled = compile_intent(question)
     ctx = get_context(db, store_id, days=days)
     if ctx is None:
         return ChiefAgentResponse(
@@ -692,30 +814,70 @@ def answer_as_chief(
             conclusion="门店数据不足，无法诊断。",
             answer="门店数据不足，无法诊断。请先补齐门店基础资料。",
             confidence="low",
+            decision=compiled.to_decision(),
         )
 
-    # 降级链入口：LLM 配置 → ReAct；否则 → 规则
+    memory_prompt = _memory_lines(db, store_id)
+    allowed_query = first_query_tool_for(compiled)
+
+    def _with_decision(resp: ChiefAgentResponse) -> ChiefAgentResponse:
+        decision = compiled.to_decision()
+        if resp.actions:
+            decision["action"] = resp.actions[0]
+        if not decision.get("object_name") and resp.conclusion:
+            decision["object_name"] = resp.conclusion[:40]
+        resp.decision = decision
+        resp.execution_tier = decision.get("execution_tier")
+        if resp.actions:
+            resp.actions = resp.actions[:1]
+        return resp
+
     if not is_llm_configured("general.consulting"):
-        return _rule_fallback(db, ctx, question)
+        return _with_decision(_rule_fallback(db, ctx, question))
 
     try:
-        parsed, agents_called, llm_meta = _react_loop(db, ctx, question)
-        return ChiefAgentResponse(
-            question=question,
-            question_type="llm_react",
-            mode="react",
-            conclusion=parsed.get("conclusion", ""),
-            reasons=parsed.get("reasons", []),
-            actions=parsed.get("actions", []),
-            expected=parsed.get("expected", ""),
-            confidence="high",
-            agents_called=agents_called,
-            answer=parsed.get("answer", ""),
-            llm=llm_meta,
+        parsed, agents_called, llm_meta = _react_loop(
+            db,
+            ctx,
+            question,
+            allowed_query=allowed_query,
+            memory_prompt=memory_prompt,
+        )
+        if parsed.get("needs_clarification"):
+            return _with_decision(
+                ChiefAgentResponse(
+                    question=question,
+                    question_type="clarification",
+                    mode="clarification",
+                    conclusion=parsed.get("conclusion", ""),
+                    answer=parsed.get("answer", ""),
+                    confidence="high",
+                    agents_called=agents_called,
+                    clarification=parsed.get("clarification"),
+                )
+            )
+        if parsed.get("object_name"):
+            compiled.object_name = parsed["object_name"]
+        if parsed.get("action_type"):
+            compiled.action_type = parsed["action_type"]
+        return _with_decision(
+            ChiefAgentResponse(
+                question=question,
+                question_type="llm_react",
+                mode="react",
+                conclusion=parsed.get("conclusion", ""),
+                reasons=parsed.get("reasons", []),
+                actions=parsed.get("actions", []),
+                expected=parsed.get("expected", ""),
+                confidence="high",
+                agents_called=agents_called,
+                answer=parsed.get("answer", ""),
+                llm=llm_meta,
+            )
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("chief_agent ReAct failed, falling back to rule: %s", exc)
         fallback = _rule_fallback(db, ctx, question)
         fallback.error = str(exc)[:200]
         fallback.mode = "rule_fallback"
-        return fallback
+        return _with_decision(fallback)

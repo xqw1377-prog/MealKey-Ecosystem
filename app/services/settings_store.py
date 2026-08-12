@@ -52,36 +52,6 @@ EDITABLE_KEYS: dict[str, dict[str, Any]] = {
         "description": "竞品数据源鉴权",
         "group": "competition",
     },
-    "deepseek_api_key": {
-        "label": "DeepSeek API Key",
-        "is_secret": True,
-        "description": "独立部署大模型引擎 · 咨询主链",
-        "group": "llm",
-    },
-    "qwen_api_key": {
-        "label": "通义千问 API Key",
-        "is_secret": True,
-        "description": "独立部署大模型引擎 · 千问/视觉",
-        "group": "llm",
-    },
-    "dashscope_api_key": {
-        "label": "DashScope API Key",
-        "is_secret": True,
-        "description": "与千问互通；可作 QWEN 后备",
-        "group": "llm",
-    },
-    "moonshot_api_key": {
-        "label": "Kimi / Moonshot API Key",
-        "is_secret": True,
-        "description": "独立部署大模型引擎 · 品牌/长上下文",
-        "group": "llm",
-    },
-    "ark_api_key": {
-        "label": "豆包 / 火山方舟 API Key",
-        "is_secret": True,
-        "description": "可选；豆包文本链路",
-        "group": "llm",
-    },
     "asr_service_url": {
         "label": "ASR 服务地址",
         "is_secret": False,
@@ -111,6 +81,12 @@ EDITABLE_KEYS: dict[str, dict[str, Any]] = {
         "is_secret": False,
         "description": "OpenAI 兼容 ASR 回退模型名",
         "group": "speech",
+    },
+    "auto_pilot_level": {
+        "label": "AI 自动经营等级",
+        "is_secret": False,
+        "description": "0=全部问我；1=零风险动作自动（改标题/描述）；2=低风险可回滚动作自动；3=中风险也可自动",
+        "group": "autopilot",
     },
 }
 

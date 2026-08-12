@@ -102,11 +102,12 @@ def _classify_agent(text: str) -> str:
     mapping: list[tuple[str, list[str]]] = [
         ("competition", ["竞争", "附近", "谁抢", "商圈", "对手", "竞品"]),
         ("menu", ["菜单", "加什么菜", "卖什么", "sku", "结构", "套餐缺口"]),
+        ("storefront", ["装修", "店页", "展示", "首图"]),
         ("product", ["主图", "标题", "单品", "牛肉饭", "爆品", "图片"]),
         ("service", ["客服", "回复", "话术", "投诉", "怎么回复"]),
         ("review", ["评价", "差评", "评分", "口碑", "好评"]),
         ("growth", ["增长", "提升", "计划", "先做什么", "怎么涨", "下一步"]),
-        ("ads", ["投流", "广告", "推广", "流量购买"]),
+        ("ads", ["投流", "广告", "推广", "流量购买", "流量"]),
         ("crm", ["复购", "回头客", "流失", "老客", "新客"]),
         ("diagnosis", ["订单", "下降", "为什么", "诊断", "怎么了", "没人"]),
     ]
@@ -159,7 +160,7 @@ def _compile_constraint(raw: str) -> CompiledIntent | None:
         cap = float(m.group(1) or m.group(2))
         return CompiledIntent(kind="constraint", raw_text=raw, ready=True, slots={"lunch_capacity": cap})
     m = re.search(r"(?:到手|到手率|利润率|利润底线)[^0-9]{0,10}(\d+(?:\.\d+)?)\s*%?", raw)
-    if m and not re.search(r"(做到|拉到|提到).{0,6}利润", raw):
+    if m and not re.search(r"(做到|拉到|提到|提高到|拉回)", raw):
         val = float(m.group(1))
         if val > 1:
             val = val / 100.0
@@ -242,7 +243,7 @@ def _compile_action(raw: str) -> CompiledIntent | None:
     if bm and re.search(r"(广告|投流|预算|花)", raw):
         budget = float(bm.group(1))
 
-    if re.search(r"(换主图|改主图|主图.*(换|改|优化))", raw):
+    if re.search(r"(换主图|改主图|换.{0,8}主图|主图.{0,8}(换|改|优化))", raw):
         return _action(
             raw,
             "change_main_image",
@@ -252,14 +253,14 @@ def _compile_action(raw: str) -> CompiledIntent | None:
             ready=True,
             detail=f"生成{dish or '招牌菜'}主图方案，先出可落地稿",
         )
-    if re.search(r"(改标题|换标题|标题优化)", raw):
+    if re.search(r"(改标题|换标题|标题优化|改.{0,4}标题|换.{0,4}标题)", raw):
         return _action(raw, "change_title", dish or "商品标题", "writeback", "product", ready=True)
     if re.search(r"(回差评|差评回复|差评怎么回|批量回复)", raw):
         return _action(raw, "batch_reply_negative_reviews", "差评回复", "writeback", "service", ready=True)
     if re.search(r"(上套餐|做套餐|29元套餐|推出套餐)", raw):
         name = "29元套餐" if "29" in raw else (dish or "价值套餐")
         return _action(raw, "add_set_meal", name, "confirm", "menu", ready=True)
-    if re.search(r"(参加活动|报活动|上满减|对冲竞品活动)", raw):
+    if re.search(r"(参加活动|报活动|上满减|对冲竞品活动|参加.{0,6}活动)", raw):
         intent = _action(raw, "join_lunch_campaign", "平台活动", "confirm", "promo", ready=not (budget is None and "花" in raw))
         intent.budget = budget
         if budget is None:
@@ -267,7 +268,7 @@ def _compile_action(raw: str) -> CompiledIntent | None:
             intent.should_ask = True
             intent.ready = False
         return intent
-    if re.search(r"(投流|投广告|广告费|帮我花).{0,12}(花|投|推)", raw) or re.search(r"(花掉|投放).{0,8}(广告|投流)", raw):
+    if re.search(r"(投流|投广告|打广告|广告费|花掉.{0,6}广告|投放)", raw) and not re.search(r"要不要", raw):
         intent = _action(raw, "boost_hero_item_ads", dish or "午餐投流", "confirm", "ads", ready=budget is not None)
         intent.budget = budget
         intent.metric = "orders"

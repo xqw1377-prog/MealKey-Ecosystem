@@ -317,3 +317,26 @@ def understanding_gap_candidate(understanding: MerchantUnderstanding) -> Optiona
         "key": q.key,
         "options": q.options,
     }
+
+
+def ingest_attachment_knowledge(db: Session, store_id: str, parsed_files: list[Any]) -> MerchantUnderstanding | None:
+    """把附件提取文本写入 A 类知识（菜单/后台截图），不问老板已能看见的事。"""
+    snippets: list[str] = []
+    for item in parsed_files or []:
+        text = str(getattr(item, "extracted_text", "") or "").strip()
+        name = str(getattr(item, "name", "") or "附件")
+        if not text:
+            continue
+        snippets.append(f"{name}: {text[:800]}")
+    if not snippets:
+        return None
+    view = load_understanding(db, store_id)
+    blob = "\n".join(snippets)[:4000]
+    profile = dict(view.store_profile or {})
+    profile["from_files"] = blob
+    profile["from_files_at"] = datetime.now(timezone.utc).isoformat()
+    if any(k in blob for k in ("菜单", "套餐", "元", "价格")):
+        profile["has_menu_snapshot"] = True
+    view.store_profile = profile
+    view.known_count = len(view.store_profile)
+    return _save(db, view)

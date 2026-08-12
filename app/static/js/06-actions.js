@@ -704,6 +704,21 @@ async function askStoreManager(question, options = {}) {
     if (response.understanding) {
       state.understanding = response.understanding;
     }
+    if (response.decision && typeof currentNeedCard === "function") {
+      const d = response.decision;
+      if (d.kind !== "setting" && d.kind !== "constraint") {
+        state.focusOverrideCard = {
+          id: `decision:${d.action_type || "nba"}`,
+          title: d.action || response.conclusion || "今天这一件",
+          why_now: response.expected || "确认后我继续推进。",
+          need_from_owner: d.execution_tier === "confirm" ? "需要你确认后执行" : "方案已备好",
+          interrupt_reason: d.execution_tier === "confirm" ? "confirm" : "report_result",
+          arbiter_state: d.execution_tier === "confirm" ? "confirm" : "report_result",
+          meta: d.execution_tier || "decision",
+          guide_type: d.execution_tier === "confirm" ? "APPROVAL" : "INFO",
+        };
+      }
+    }
     if (response.workspace) {
       state.runtimeWorkspace = response.workspace;
     }
@@ -712,6 +727,8 @@ async function askStoreManager(question, options = {}) {
     }
     if (response.intent === "goal") {
       notifySuccess("目标已建立，已进入经营线程");
+    } else if (response.intent === "action") {
+      notifySuccess("已准备好这一件事");
     } else if (response.intent === "understanding_update") {
       const stillBlocking =
         response?.understanding?.mos_satisfied === false ||

@@ -978,10 +978,17 @@ def apply_menu_patch(db: Session, store_id: str, patch_index: int, days: int = 7
     db.add(recommendation)
     db.flush()
 
+    # 绑定 work_thread_id (Track A: 同一件事贯穿三栏)
+    from app.services.thread_engine import ensure_thread_for_action
+    thread = ensure_thread_for_action(db, store_id, f"菜单优化：{action_type}")
+    recommendation.work_thread_id = thread.id
+    db.flush()
+
     metric = ctx.store_state.kpis.get(expected_metric)
     experiment = Experiment(
         recommendation_id=recommendation.id,
         store_id=store_id,
+        work_thread_id=thread.id,
         item_id=item.id,
         baseline_value=metric.observed_value if metric else None,
         observed_value=None,
@@ -1072,10 +1079,16 @@ def apply_menu_cleanup(db: Session, store_id: str, candidate_index: int, days: i
     db.add(recommendation)
     db.flush()
 
+    from app.services.thread_engine import ensure_thread_for_action
+    thread = ensure_thread_for_action(db, store_id, "菜单清理优化")
+    recommendation.work_thread_id = thread.id
+    db.flush()
+
     metric = ctx.store_state.kpis.get("cvr")
     experiment = Experiment(
         recommendation_id=recommendation.id,
         store_id=store_id,
+        work_thread_id=thread.id,
         item_id=target_item.id,
         baseline_value=metric.observed_value if metric else None,
         observed_value=None,
@@ -1182,10 +1195,16 @@ def apply_menu_bundle(db: Session, store_id: str, opportunity_index: int, days: 
     db.add(recommendation)
     db.flush()
 
+    from app.services.thread_engine import ensure_thread_for_action
+    thread = ensure_thread_for_action(db, store_id, "新增套餐优化")
+    recommendation.work_thread_id = thread.id
+    db.flush()
+
     metric = ctx.store_state.kpis.get("cvr")
     experiment = Experiment(
         recommendation_id=recommendation.id,
         store_id=store_id,
+        work_thread_id=thread.id,
         item_id=item.id,
         baseline_value=metric.observed_value if metric else None,
         observed_value=None,

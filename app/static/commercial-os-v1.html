@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MealKey Commercial OS V1</title>
+  <style>
+    :root {
+      --bg: #111318;
+      --panel: #1a1d24;
+      --line: #2a2f3a;
+      --text: #e8eaef;
+      --muted: #9aa3b2;
+      --accent: #c9a227;
+      --ok: #3d9a6a;
+      --warn: #c9842a;
+      --info: #4d8fd6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 64px; }
+    h1 { font-size: 24px; font-weight: 650; margin: 0 0 8px; }
+    h2 { font-size: 18px; font-weight: 650; margin: 28px 0 12px; }
+    h3 { font-size: 15px; font-weight: 650; margin: 20px 0 8px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .lead { color: var(--text); font-size: 15px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 24px; }
+    .tabs button {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .tabs button.on { color: var(--text); border-color: var(--accent); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--ok);
+      background: var(--panel);
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .callout.info { border-left-color: var(--info); }
+    .callout.warn { border-left-color: var(--warn); }
+    .callout b { display: block; margin-bottom: 4px; color: var(--text); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+    .stats.four { grid-template-columns: repeat(4, 1fr); }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .stat strong { display: block; font-size: 22px; margin-bottom: 4px; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    td.r, th.r { text-align: right; }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .cards { display: grid; gap: 10px; }
+    .cards.three { grid-template-columns: repeat(3, 1fr); }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .card h3 { margin: 0 0 8px; }
+    .card p { margin: 0; }
+    .tier { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+    .tier b { display: block; margin-bottom: 2px; }
+    @media (max-width: 720px) {
+      .stats, .stats.four, .cards.three { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>MealKey Commercial OS V1.2</h1>
+    <p class="lead">平台是执行场，MealKey 是商家的经营控制层。定价不变；竞争战略已冻结。</p>
+    <div class="tabs" id="tabs"></div>
+    <section class="panel on" id="freeze">
+      <div class="callout"><b>Production Evidence，不是「V1 开发完成」</b>20 Paid Stores / 100 Verified Closed Loops / 10 Memory-Changed Decisions / 1 Natural Renewal / 真实 AI Cost per Store。100 条闭环是 PMF 种子，不是护城河。V1 不加利润增量分成，也不把白标 ERP/POS 当主路径。</div>
+      <div class="stats four">
+        <div class="stat"><strong>¥300</strong><span>店 / 月经营服务费</span></div>
+        <div class="stat"><strong>×1.30</strong><span>真实 AI 成本加价</span></div>
+        <div class="stat"><strong>50%→70%</strong><span>首年分润，90天解锁奖励</span></div>
+        <div class="stat"><strong>20 / 100 / 10</strong><span>付费店 / 闭环 / 记忆改判断</span></div>
+      </div>
+      <h2>战略位</h2>
+      <p>完整竞争战略冻结稿：<a href="/competitive-strategy" style="color:#c9a227">/competitive-strategy</a>
+         · 100 问经营契约：<a href="/operating-demands" style="color:#c9a227">/operating-demands</a></p>
+      <table>
+        <tr><th>不要再写</th><th>以后统一写</th></tr>
+        <tr><td>平台 AI 只会建议，我们会执行</td><td>平台优化生态，MealKey 站在老板一边看整盘生意</td></tr>
+        <tr><td>跨平台 Dashboard 就是护城河</td><td>跨平台只是入口；资产是经营事实、动作结果、策略记忆</td></tr>
+        <tr><td>经营性商业价值 ≈ 0</td><td>商业牵引尚未验证；技术资产已经形成</td></tr>
+        <tr><td>白标嵌入 ERP/POS 是最高可行主路径</td><td>先掌握用户关系，跑出 100/500/1000 店再谈 Embedded</td></tr>
+        <tr><td>增量分成当第一收费方式</td><td>Attribution 没验证之前，¥300 买持续经营责任</td></tr>
+      </table>
+      <h2>护城河三层</h2>
+      <div class="cards three">
+        <div class="card"><h3>Business Truth</h3><p>不是美团账、淘宝账、京东账，而是这家商户真正赚了多少钱：订单、补贴、佣金、广告、成本、包装、退款、活动、履约。</p></div>
+        <div class="card"><h3>Outcome Data</h3><p>什么店、什么问题、什么时间、做了什么、为什么做、最后怎么样。这是经营决策效果数据，不是平台原始报表。</p></div>
+        <div class="card"><h3>Strategy Memory</h3><p>这类门店遇到这种情况，以前什么策略成功率最高。MealKey 因此是商家自己的经营记忆系统。</p></div>
+      </div>
+      <h2>对外三句话</h2>
+      <div class="cards">
+        <div class="card"><h3>对商家</h3><p>我们不是替代美团的 AI。美团你继续用，淘宝的也继续用。MealKey 站在老板这一边，把所有平台、成本和经营结果放到一起做决定。¥300/店/月起，AI 算力按真实使用结算。</p></div>
+        <div class="card"><h3>对合伙人</h3><p>首年基础 50% 先结。门店活过 90 天，才解锁 +5%～20%。最高 70%。第二年 30%、第三年 20%、第四年以后 10%。AI 算力不分润。</p></div>
+        <div class="card"><h3>对公司内部</h3><p>第一年用毛利买分发，后面靠留存赚钱。平台压力越大，越买渠道、不买广告。Runtime 可以买；Operating Intelligence 必须自建。</p></div>
+      </div>
+    </section>
+    <section class="panel" id="sla">
+      <div class="callout info"><b>¥300 卖的是持续经营责任</b>不卖 AI 分析、AI 诊断、AI 报表、AI 聊天。这些正在迅速免费化。</div>
+      <h2>五项 SLA</h2>
+      <table>
+        <tr><th>承诺</th><th>对应能力</th></tr>
+        <tr><td>每天有人看</td><td>Sensing / POIE / 异常主动发现</td></tr>
+        <tr><td>重要问题有人判断</td><td>Profit / Campaign / Diagnosis</td></tr>
+        <tr><td>该做什么有人推动</td><td>ODO / Now / WorkThread</td></tr>
+        <tr><td>做完以后有人回来检查</td><td>Experiment / Result 回收</td></tr>
+        <tr><td>成功失败都会成为下一次经验</td><td>Strategy Memory</td></tr>
+      </table>
+      <h2>三本账，三个阶段</h2>
+      <table>
+        <tr><th>阶段</th><th>收入</th><th>前提</th></tr>
+        <tr><td>V1 Subscription</td><td>¥300 经营服务费 + AI 算力费</td><td>现在。不承诺「这个月一定增加 20% 利润」</td></tr>
+        <tr><td>V2 + Execution</td><td>权限成熟后的执行托管</td><td>写回与权限被真实店验证</td></tr>
+        <tr><td>V3 Optional Outcome Share</td><td>真正证明 Attribution 后的增值</td><td>不能在归因没站住时跟老板分钱</td></tr>
+      </table>
+      <p>客户账单只出现「MealKey AI 店长 ¥300」和「AI 算力 ¥XX」。后台必须知道 AI Cost / Store、/ Useful Action、/ Closed Loop、/ Verified Result。</p>
+    </section>
+    <section class="panel" id="goal">
+      <div class="callout warn"><b>20 家店同时是商业模式实验</b>不能全是朋友友情测试。至少一部分必须真正付钱，哪怕优惠。否则还是没有商业证据。</div>
+      <h2>四个 Cohort，各 5 家</h2>
+      <table>
+        <tr><th>Cohort</th><th>家数</th><th>要回答的问题</th></tr>
+        <tr><td>直营获客</td><td>5</td><td>自己卖需要多少成本</td></tr>
+        <tr><td>老板转介绍</td><td>5</td><td>Result 有没有自然传播力</td></tr>
+        <tr><td>Partner 渠道</td><td>5</td><td>高分润到底能不能驱动销售</td></tr>
+        <tr><td>连锁内部扩店</td><td>5</td><td>1 店 → N 店是否真的发生</td></tr>
+      </table>
+      <h2>同时测四件事</h2>
+      <div class="cards three">
+        <div class="card"><h3>Product</h3><p>Closed Loop 有没有真正创造价值？</p></div>
+        <div class="card"><h3>Price</h3><p>¥300 老板愿不愿继续付？</p></div>
+        <div class="card"><h3>Compute / Distribution</h3><p>每店实际 AI 成本多少？合伙人能不能自然带来下一家？</p></div>
+      </div>
+      <h2>商业路线优先级</h2>
+      <table>
+        <tr><th>路线</th><th>优先级</th><th>判断</th></tr>
+        <tr><td>¥300 AI 店长 + Partner 分销</td><td>P0</td><td>第一验证路线</td></tr>
+        <tr><td>人工辅助的 Closed Loop</td><td>P0</td><td>冷启动必须，藏在产品后面</td></tr>
+        <tr><td>跨平台统一经营</td><td>P0</td><td>进入楔子，不是最终资产</td></tr>
+        <tr><td>执行托管</td><td>P1</td><td>权限成熟后扩大价值</td></tr>
+        <tr><td>Embedded / API</td><td>P1/P2</td><td>带着已验证的 Operating Intelligence 去谈</td></tr>
+        <tr><td>Result / 利润增量分成</td><td>P2</td><td>Attribution 成熟以后</td></tr>
+        <tr><td>Strategy / Data 产品</td><td>P3</td><td>足够门店和 Outcome Data 以后</td></tr>
+      </table>
+      <div class="callout info"><b>数据通道不是爬虫赌命</b>Official API → Service Provider API → CSV/Excel → 报表/截图 → 商家确认。无论哪条，最终进入同一个 StoreState。这叫 Platform Independence。</div>
+    </section>
+    <section class="panel" id="customer">
+      <div class="callout info"><b>客户只回答两个问题</b>接多少家店？买多久？没有 Token 套餐、Agent 套餐、功能等级、会员等级，也不发券。</div>
+      <h2>门店数 × 购买周期</h2>
+      <table>
+        <tr><th>同一企业活跃店</th><th class="r">月付 / 店</th><th class="r">季付 / 店</th><th class="r">年付 / 店</th><th class="r">年付等效月价</th></tr>
+        <tr><td>1–4</td><td class="r">¥300</td><td class="r">¥825</td><td class="r">¥3,000</td><td class="r">¥250</td></tr>
+        <tr><td>5–19</td><td class="r">¥290</td><td class="r">¥797.5</td><td class="r">¥2,900</td><td class="r">¥242</td></tr>
+        <tr><td>20–49</td><td class="r">¥280</td><td class="r">¥770</td><td class="r">¥2,800</td><td class="r">¥233</td></tr>
+        <tr><td>50–99</td><td class="r">¥270</td><td class="r">¥742.5</td><td class="r">¥2,700</td><td class="r">¥225</td></tr>
+        <tr><td>100–299</td><td class="r">¥260</td><td class="r">¥715</td><td class="r">¥2,600</td><td class="r">¥217</td></tr>
+        <tr><td>300+</td><td class="r">¥250</td><td class="r">¥687.5</td><td class="r">¥2,500</td><td class="r">¥208</td></tr>
+      </table>
+      <p>季付：付 2.75 个月，用 3 个月。年付：付 10 个月，用 12 个月。等效月价红线 ¥200，低于必须人工审批。入口在用户头像，不另开技能页。</p>
+      <h2>标准单店账单（规划）</h2>
+      <div class="stats">
+        <div class="stat"><strong>¥300</strong><span>经营服务费</span></div>
+        <div class="stat"><strong>≈¥108</strong><span>AI 算力（4.5M tokens）</span></div>
+        <div class="stat"><strong>≈¥408</strong><span>月合计</span></div>
+      </div>
+      <p>自有门店只决定客户价格。推荐门店才进入合伙人业绩。同一家店不能既打折又自返佣。</p>
+    </section>
+    <section class="panel" id="ai">
+      <div class="callout warn"><b>Token 不包死，也不按固定单价赌</b>客户只看到「本月 AI 算力：¥108.30」。内部按 Text / Tool / Image / Speech / Search / Embedding 真实成本记账，再乘 1.30。</div>
+      <h2>规划模型（预算汇率 $1 = ¥7.3）</h2>
+      <table>
+        <tr><th class="r">月 Token / 店</th><th class="r">AI 实际成本</th><th class="r">客户 AI 费 ×1.30</th></tr>
+        <tr><td class="r">3M</td><td class="r">≈ ¥55</td><td class="r">≈ ¥72</td></tr>
+        <tr><td class="r">4.5M Base</td><td class="r">≈ ¥83</td><td class="r">≈ ¥108</td></tr>
+        <tr><td class="r">6M</td><td class="r">≈ ¥111</td><td class="r">≈ ¥144</td></tr>
+      </table>
+      <p>条件：POIE 过滤 + Context Projection + Prompt Cache + Model Router。负载示意 60% Luna / 30% Terra / 10% Sol。</p>
+      <h2>Model Router</h2>
+      <div class="tier"><b>Code</b><span>利润公式、同比环比、活动叠加、阈值、实验到期、权限、Risk Gate、WorkThread</span></div>
+      <div class="tier"><b>Luna</b><span>分类、摘要、普通回复、结构化抽取、轻度判断、Free Audit 抽取</span></div>
+      <div class="tier"><b>Terra</b><span>经营异常诊断、Action 生成、活动判断、商品优化</span></div>
+      <div class="tier"><b>Sol</b><span>复杂归因、跨领域决策、高价值异常、重要老板问题</span></div>
+      <h2>预算控制，不停店长</h2>
+      <table>
+        <tr><th>水位</th><th>动作</th></tr>
+        <tr><td>默认 ¥150 实际成本 / 店 / 月</td><td>企业可共享算力池，不是每店死卡</td></tr>
+        <tr><td>80%</td><td>提高缓存、降低非关键模型、批处理低优先任务</td></tr>
+        <tr><td>100%</td><td>非关键深度分析需确认；高价值异常、风险、已有 WorkThread 继续</td></tr>
+        <tr><td>Free Audit ≤ ¥5</td><td>默认 Luna + Terra，高价值连锁才上 Sol</td></tr>
+      </table>
+    </section>
+    <section class="panel" id="partner">
+      <div class="callout"><b>拉进来有钱，留得住更多钱</b>50% 基础首年佣金按规则结。+5%～20% Performance Bonus 只认 90-Day Qualified Store。一个月全退的 300 家，拿不到 70%。</div>
+      <h2>首年业绩档（追溯补差）</h2>
+      <table>
+        <tr><th>当年新增有效付费门店</th><th class="r">基础</th><th class="r">奖励</th><th class="r">首年最终</th></tr>
+        <tr><td>1–19</td><td class="r">50%</td><td class="r">+0%</td><td class="r">50%</td></tr>
+        <tr><td>20–49</td><td class="r">50%</td><td class="r">+5%</td><td class="r">55%</td></tr>
+        <tr><td>50–99</td><td class="r">50%</td><td class="r">+10%</td><td class="r">60%</td></tr>
+        <tr><td>100–299</td><td class="r">50%</td><td class="r">+15%</td><td class="r">65%</td></tr>
+        <tr><td>300+</td><td class="r">50%</td><td class="r">+20%</td><td class="r">70%</td></tr>
+      </table>
+      <p>第 300 家不是多赚一家，而是把这一年<strong>活过 90 天</strong>的新增池首年分润从 65% 抬到 70%。65%/70% 需要能做 Onboarding 和一线客户成功。AI 算力不分润。自有门店不算推荐业绩。</p>
+      <h2>生命周期</h2>
+      <div class="stats four">
+        <div class="stat"><strong>50%–70%</strong><span>首 12 个月</span></div>
+        <div class="stat"><strong>30%</strong><span>第 13–24 个月</span></div>
+        <div class="stat"><strong>20%</strong><span>第 25–36 个月</span></div>
+        <div class="stat"><strong>10%</strong><span>第 37 个月以后</span></div>
+      </div>
+      <h2>70% 是 CAC，不是稳态毛利</h2>
+      <table>
+        <tr><th>年</th><th class="r">Partner</th><th class="r">Partner 收入</th><th class="r">MealKey 基础收入</th></tr>
+        <tr><td>Y1</td><td class="r">70%</td><td class="r">¥2,100</td><td class="r">¥900</td></tr>
+        <tr><td>Y2</td><td class="r">30%</td><td class="r">¥900</td><td class="r">¥2,100</td></tr>
+        <tr><td>Y3</td><td class="r">20%</td><td class="r">¥600</td><td class="r">¥2,400</td></tr>
+        <tr><td>Y4+</td><td class="r">10%</td><td class="r">¥300</td><td class="r">¥2,700</td></tr>
+      </table>
+      <p>年付 ¥3,000 计。四年基础订阅 ¥12,000，Partner ¥3,900，MealKey ¥8,100（67.5%）。模式成不成立看客户能不能续到第二年。</p>
+      <h3>有效新增</h3>
+      <p>首次付费 + 真实有效 + 已付款未退款 + 基本激活。30 天计入新增业绩（基础 50% 可结）。90 天确认 90-Day Qualified Store，才解锁年度 Bonus。现有品牌扩店算 Net New Active Stores，并重新进入首年 Cohort。自己的门店不算推荐业绩。</p>
+    </section>
+    <section class="panel" id="flywheel">
+      <h2>三条飞轮汇到 Paid Active Stores</h2>
+      <div class="cards three">
+        <div class="card"><h3>经营</h3><p>真实数据 → 判断 → Action → Result → Memory → 更好的 Action</p></div>
+        <div class="card"><h3>客户裂变</h3><p>Result → 结果卡 → 分享 → Free Audit → 付费。CTA 是「测一下我的店」。</p></div>
+        <div class="card"><h3>合伙人</h3><p>见效 → 成为 Partner → 推荐同行 → 冲档 50%–70% → 长期 10% 尾佣</p></div>
+      </div>
+      <h2>北极星不是注册量</h2>
+      <div class="stats"><div class="stat"><strong>LTV / Y1 CAC</strong><span>Partner-acquired Store</span></div></div>
+      <table>
+        <tr><th>领域</th><th>核心指标</th></tr>
+        <tr><td>增长</td><td>Net New Paid Active Stores</td></tr>
+        <tr><td>裂变</td><td>Result → Audit → Paid Conversion</td></tr>
+        <tr><td>Partner</td><td>Annual New Qualified Stores</td></tr>
+        <tr><td>Partner 质量</td><td>90-day / 12-month Retention by Partner</td></tr>
+        <tr><td>扩店</td><td>Stores per Logo</td></tr>
+        <tr><td>Token</td><td>Tokens / Active Store / Month</td></tr>
+        <tr><td>成本</td><td>AI Cost / Active Store</td></tr>
+        <tr><td>效率</td><td>AI Cost / Useful Action</td></tr>
+        <tr><td>闭环</td><td>AI Cost / Verified Result</td></tr>
+        <tr><td>商业</td><td>Net Subscription Revenue / Store</td></tr>
+        <tr><td>长期</td><td>Partner Cohort LTV / CAC</td></tr>
+      </table>
+      <div class="callout info"><b>公司目标先于功能清单</b>20 / 100 / 10 / 1 / 真实 AI Cost。再多写 2 万个功能，也替代不了老板愿意每个月把 300 块给 MealKey，以及记忆真的改了下一次判断。</div>
+    </section>
+  </div>
+  <script>
+    const tabs = [
+      ["freeze", "战略收口"],
+      ["sla", "¥300 履约"],
+      ["goal", "20店实验"],
+      ["customer", "客户订阅"],
+      ["ai", "AI 算力"],
+      ["partner", "合伙人"],
+      ["flywheel", "飞轮与北极星"],
+    ];
+    const bar = document.getElementById("tabs");
+    tabs.forEach(([id, label], i) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      if (i === 0) btn.className = "on";
+      btn.onclick = () => {
+        document.querySelectorAll(".tabs button").forEach((el) => el.classList.remove("on"));
+        document.querySelectorAll(".panel").forEach((el) => el.classList.remove("on"));
+        btn.classList.add("on");
+        document.getElementById(id).classList.add("on");
+      };
+      bar.appendChild(btn);
+    });
+  </script>
+</body>
+</html>

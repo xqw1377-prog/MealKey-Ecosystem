@@ -29,3 +29,7 @@ class Notification(IdMixin, TimestampMixin, Base):
     # 通知治理：节流/合并
     clock_phase: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # morning_readiness / lunch_nba / ...
     digest_group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # 合并组 key
+    push_status: Mapped[str] = mapped_column(String(16), default="delivered")  # delivered | queued | read
+    push_suppressed_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

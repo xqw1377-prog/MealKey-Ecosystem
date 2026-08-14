@@ -11,6 +11,7 @@ const state = {
   strategyMemory: null,
   competitionMap: null,
   collectionRuns: [],
+  platformIntel: { items: [], last_run: null, sources: [] },
   platformLinks: [],
   publicConfig: null,
   settingsOverview: null,
@@ -38,11 +39,71 @@ const state = {
   opsRailCollapsed: false,
   mobileTab: "today",
   focusOverrideCard: null,
+  focusedWorkKey: null,
+  focusedWorkSlot: null,
+  pendingWorkThreadId: null,
   understanding: null,
   menuDeepDiagnosis: null,
   ownerProfile: null,
   pendingAvatarDataUrl: null,
+  commercialBoard: null,
+  lastAuthError: null,  // { type: "network"|"token_expired"|"server", message: "..." }
+  pendingImportType: null,  // "funnel"|"ads"|"reviews"|"campaigns"
 };
+
+const STORE_SELECTION_KEY = "mealky_current_store_id";
+
+function persistedStoreId() {
+  try {
+    return String(window.localStorage.getItem(STORE_SELECTION_KEY) || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function persistStoreId(storeId) {
+  const id = String(storeId || "").trim();
+  try {
+    if (!id) {
+      window.localStorage.removeItem(STORE_SELECTION_KEY);
+      return;
+    }
+    window.localStorage.setItem(STORE_SELECTION_KEY, id);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function normalizeStoreFingerprintPart(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function storeFingerprint(store) {
+  const name = normalizeStoreFingerprintPart(store?.name);
+  const city = normalizeStoreFingerprintPart(store?.city);
+  const category = normalizeStoreFingerprintPart(store?.category);
+  return [name, city, category].filter(Boolean).join("|") || String(store?.id || "").trim();
+}
+
+function dedupeStores(stores, preferredId = "") {
+  const keepFirstId = String(preferredId || "").trim();
+  const list = Array.isArray(stores) ? [...stores] : [];
+  if (keepFirstId) {
+    list.sort((a, b) => {
+      if (a?.id === keepFirstId) return -1;
+      if (b?.id === keepFirstId) return 1;
+      return 0;
+    });
+  }
+  const seen = new Set();
+  return list.filter((store) => {
+    const key = storeFingerprint(store);
+    if (!key) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 const qs = (selector) => document.querySelector(selector);
 

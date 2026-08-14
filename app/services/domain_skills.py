@@ -382,6 +382,145 @@ def analyze_traffic(
     )
 
 
+def analyze_ads(
+    *,
+    ads_daily: list[dict] | None = None,
+    profit_floor: float | None = None,
+    product_ready: bool = True,
+) -> DomainSkillResult:
+    """投流实战诊断 — 基于真实 AdSpendDaily 数据。
+
+    判断维度:
+    1. CPC 趋势(上升=竞争加剧/素材衰退)
+    2. ROAS 变化(下降=投流效率恶化)
+    3. 花费占比(占GMV比例过高=买流水)
+    4. 广告订单占比(判断对自然流量的依赖)
+
+    ads_daily: [{day, cost, clicks, impressions, orders_from_ads, gmv_from_ads, cpc, roas, ctr}]
+    """
+    findings: list[DomainFinding] = []
+    candidate_actions: list[CandidateAction] = []
+
+    if not ads_daily or len(ads_daily) < 2:
+        return DomainSkillResult(
+            domain="traffic",
+            findings=[DomainFinding(
+                code="ADS_DATA_INSUFFICIENT",
+                severity="low",
+                title="投流数据不足",
+                description="需要至少 2 天投流数据才能做趋势判断。导入投流报表后会自动分析。",
+                confidence=0.7,
+            )],
+            diagnosis=DomainDiagnosis(primary="投流数据不足,暂不诊断", confidence=0.6),
+            evidence=["投流数据 < 2 天"],
+            candidate_actions=[],
+            dependencies=[],
+            recommended_next_step="导入投流报表",
+        )
+
+    # 按日期排序,取最近 7 天
+    rows = sorted(ads_daily, key=lambda r: r.get("day", ""))[-7:]
+    latest = rows[-1]
+    earliest = rows[0]
+
+    # ── CPC 趋势 ──
+    cpc_now = latest.get("cpc")
+    cpc_before = earliest.get("cpc")
+    cpc_trend = None
+    if cpc_now is not None and cpc_before is not None and cpc_before > 0:
+        cpc_trend = (cpc_now - cpc_before) / cpc_before * 100
+
+    if cpc_trend is not None and cpc_trend > 20:
+        findings.append(DomainFinding(
+            code="CPC_RISING",
+            severity="high",
+            title=f"CPC 上涨 {cpc_trend:.0f}%,投流成本在恶化",
+            description=f"CPC 从 ¥{cpc_before:.1f} 涨到 ¥{cpc_now:.1f}。可能原因:竞争加剧、素材衰退、出价策略不当。",
+            confidence=0.82,
+        ))
+        candidate_actions.append(CandidateAction(
+            action_type="OPTIMIZE_AD_CREATIVE",
+            title="优化广告素材/出价",
+            detail=f"CPC 上涨 {cpc_trend:.0f}%。建议:1)检查素材是否需要更新;2)调整出价策略;3)暂停高CPC低转化时段。",
+            observation_window_hours=48,
+            risk_level="low",
+            primary_variable="budget",
+        ))
+
+    # ── ROAS 变化 ──
+    roas_now = latest.get("roas")
+    roas_before = earliest.get("roas")
+    if roas_now is not None and roas_before is not None and roas_before > 0:
+        roas_trend = (roas_now - roas_before) / roas_before * 100
+        if roas_trend < -20:
+            findings.append(DomainFinding(
+                code="ROAS_DECLINING",
+                severity="high",
+                title=f"ROAS 下降 {-roas_trend:.0f}%,投流效率在恶化",
+                description=f"ROAS 从 {roas_before:.1f} 降到 {roas_now:.1f}。每花 ¥1 带来的 GMV 在减少。",
+                confidence=0.8,
+            ))
+
+    # ── ROAS 绝对值判断 ──
+    if roas_now is not None:
+        # ROAS = gmv_from_ads / cost。但需要考虑利润率
+        # 如果到手率 60%,ROAS 至少要 > 1/0.6 = 1.67 才不亏
+        threshold = 1.0 / (profit_floor or 0.17) if profit_floor else 2.0
+        # profit_floor 是利润率底线(如0.17),那临界ROAS = 1/0.17 ≈ 5.9
+        # 但这个口径偏保守,实际用到手率
+        if roas_now < 2.0:
+            findings.append(DomainFinding(
+                code="LOW_ROAS",
+                severity="high",
+                title=f"ROAS 仅 {roas_now:.1f},投流可能亏钱",
+                description=f"ROAS {roas_now:.1f} 意味着每花 ¥1 广告费只带来 ¥{roas_now:.1f} GMV。考虑利润率后大概率亏损。",
+                confidence=0.85,
+            ))
+            if product_ready:
+                candidate_actions.append(CandidateAction(
+                    action_type="REDUCE_AD_BUDGET",
+                    title="减少投流预算",
+                    detail=f"ROAS {roas_now:.1f} 过低,建议减少预算或暂停,等商品优化后再恢复。",
+                    observation_window_hours=24,
+                    risk_level="medium",
+                    primary_variable="budget",
+                ))
+
+    # ── 花费趋势(烧钱速度) ──
+    total_cost = sum(r.get("cost") or 0 for r in rows)
+    total_ads_orders = sum(r.get("orders_from_ads") or 0 for r in rows)
+    avg_daily_cost = total_cost / len(rows) if rows else 0
+
+    # ── 综合诊断 ──
+    has_warning = any(f.severity == "high" for f in findings)
+    primary = "投流效率健康" if not has_warning else "投流效率需要优化"
+    if not findings:
+        findings.append(DomainFinding(
+            code="ADS_HEALTHY",
+            severity="positive",
+            title="投流数据正常",
+            description=f"近 {len(rows)} 天平均日花费 ¥{avg_daily_cost:.0f},CPC ¥{cpc_now or 0:.1f},ROAS {roas_now or 0:.1f}。",
+            confidence=0.7,
+        ))
+        primary = "投流效率健康,维持当前策略"
+
+    evidence = [
+        f"近 {len(rows)} 天总花费 ¥{total_cost:.0f}",
+        f"CPC {('¥' + str(round(cpc_now, 1))) if cpc_now else '未知'}",
+        f"ROAS {round(roas_now, 1) if roas_now else '未知'}",
+    ]
+
+    return DomainSkillResult(
+        domain="traffic",
+        findings=findings,
+        diagnosis=DomainDiagnosis(primary=primary, confidence=0.8),
+        evidence=evidence,
+        candidate_actions=candidate_actions,
+        dependencies=["product", "profit"],
+        recommended_next_step="优化素材/出价" if has_warning else "维持当前策略",
+    )
+
+
 def analyze_profit(
     *,
     take_home_rate: float | None = None,

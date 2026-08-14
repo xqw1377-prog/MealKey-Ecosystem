@@ -52,6 +52,9 @@ class Recommendation(IdMixin, TimestampMixin, Base):
 
     store_id: Mapped[str] = mapped_column(ForeignKey("store.id"))
     hypothesis_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hypothesis.id"), nullable=True)
+    work_thread_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("operating_thread.id"), nullable=True, index=True
+    )
     scope: Mapped[str] = mapped_column(String(16), default="item")  # item|store|market
     object_ref: Mapped[str] = mapped_column(String(128))  # e.g. item:{id}
     action_type: Mapped[str] = mapped_column(String(64))  # change_image/change_title/add_set_meal/...
@@ -76,6 +79,9 @@ class Experiment(IdMixin, TimestampMixin, Base):
 
     recommendation_id: Mapped[str] = mapped_column(ForeignKey("recommendation.id"))
     store_id: Mapped[str] = mapped_column(ForeignKey("store.id"))
+    work_thread_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("operating_thread.id"), nullable=True, index=True
+    )
     item_id: Mapped[Optional[str]] = mapped_column(ForeignKey("menu_item.id"), nullable=True)
 
     baseline_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

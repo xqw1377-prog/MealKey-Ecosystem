@@ -27,6 +27,10 @@ def _json_loads_list(raw: str | None) -> list[str]:
         return []
 
 
+def _json_dumps_list(rows: list[str]) -> str:
+    return json.dumps([row for row in rows if row], ensure_ascii=False)
+
+
 def _thread_to_brief(thread: OperatingThread) -> OperatingThreadBrief:
     return OperatingThreadBrief(
         id=thread.id,
@@ -47,9 +51,12 @@ def create_thread(
     title: str,
     goal_text: str,
     goal_id: str | None = None,
+    *,
+    thread_id: str | None = None,
 ) -> OperatingThread:
     """创建一个经营线程。"""
     thread = OperatingThread(
+        id=thread_id or None,
         store_id=store_id,
         goal_id=goal_id,
         title=title,
@@ -60,6 +67,61 @@ def create_thread(
     db.commit()
     db.refresh(thread)
     return thread
+
+
+def ensure_thread_for_action(
+    db: Session,
+    store_id: str,
+    action_title: str,
+    *,
+    goal_text: str | None = None,
+    preferred_id: str | None = None,
+) -> OperatingThread:
+    """获取或创建门店的活跃经营线程,用于绑定 Recommendation/Experiment。
+
+    策略:
+    1. 如果门店已有 active 线程 → 复用(同一件事持续推进)
+    2. 如果没有 → 创建一个新的
+
+    这样所有进入执行流程的 Rec/Exp 都能绑定到 work_thread_id,
+    实现三栏(左:发现 / 中:确认 / 右:执行)看的是同一件事。
+    """
+    preferred = str(preferred_id or "").strip()
+    if preferred:
+        existing = db.execute(
+            select(OperatingThread).where(
+                OperatingThread.store_id == store_id,
+                OperatingThread.id == preferred,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return existing
+
+    title = (action_title or "").strip()
+    goal = (goal_text or action_title or "持续推进经营优化").strip()
+
+    # 复用门店的任意活跃线程(同一门店同一时间推进同一件事)
+    existing = db.execute(
+        select(OperatingThread)
+        .where(
+            OperatingThread.store_id == store_id,
+            OperatingThread.status == "active",
+        )
+        .order_by(OperatingThread.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if existing:
+        return existing
+
+    # 没有活跃线程 → 创建一个通用的
+    return create_thread(
+        db,
+        store_id=store_id,
+        title=title[:100] if title else "经营优化",
+        goal_text=goal,
+        thread_id=preferred or None,
+    )
 
 
 def update_thread_progress(
@@ -182,3 +244,98 @@ def sync_threads_from_agents(
 
     db.commit()
     return load_active_threads(db, store_id)
+
+
+def sync_loop_thread(db: Session, item: Any, *, pack: dict[str, Any] | None = None) -> OperatingThread:
+    """把 Closed Loop 当前状态同步到 OperatingThread，保证 work_thread 可读。"""
+    payload = pack if isinstance(pack, dict) else {}
+    if not payload:
+        try:
+            payload = json.loads(getattr(item, "pack_json", "") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+
+    thread = ensure_thread_for_action(
+        db,
+        item.store_id,
+        getattr(item, "title", "") or "经营闭环",
+        goal_text=getattr(item, "title", "") or "持续推进经营闭环",
+        preferred_id=getattr(item, "id", None),
+    )
+    thread.title = getattr(item, "title", "") or thread.title
+    thread.goal_text = getattr(item, "title", "") or thread.goal_text
+
+    status = str(payload.get("thread_status") or "").strip().upper()
+    writeback = payload.get("writeback") if isinstance(payload.get("writeback"), dict) else {}
+    evidence_count = len(_evidence_rows(item))
+    observe_hours = int(getattr(item, "observe_hours", 0) or payload.get("observe_hours") or 48)
+    result = str(getattr(item, "result", "") or "").strip().lower()
+    result_label = {
+        "positive": "有效",
+        "negative": "无效",
+        "neutral": "变化不明显",
+        "unknown": "待平台继续处理",
+        "pending": "还在观察",
+    }.get(result, "进行中")
+
+    doing: list[str] = []
+    done: list[str] = []
+    current_result = ""
+    next_step = ""
+    needs_owner = False
+
+    if evidence_count:
+        done.append(f"已补 {evidence_count} 份证据")
+    if writeback.get("ok") and writeback.get("summary"):
+        done.append(str(writeback.get("summary")))
+    if writeback.get("ok") is False and writeback.get("error"):
+        current_result = f"执行未完成：{writeback.get('error')}"
+
+    if status in {"NEED_APPROVAL", "READY_TO_EXECUTE", ""}:
+        doing.append("待确认执行")
+        current_result = current_result or (f"已补 {evidence_count} 份证据，待确认提交" if evidence_count else "")
+        next_step = "确认并执行"
+        needs_owner = True
+    elif status in {"APPROVED", "EXECUTING"}:
+        doing.append("正在执行")
+        current_result = current_result or str(writeback.get("summary") or "执行中")
+        next_step = "等待执行完成"
+    elif status == "OBSERVING":
+        doing.append(f"观察中 · {observe_hours} 小时")
+        current_result = current_result or str(writeback.get("summary") or getattr(item, "notes", "") or "已进入观察窗")
+        next_step = "等待结果"
+    elif status == "WAITING_RESULT":
+        doing.append("结果待确认")
+        current_result = str(getattr(item, "notes", "") or writeback.get("summary") or f"结果：{result_label}")
+        next_step = "确认结果并归档"
+        needs_owner = True
+    elif status in {"COMPLETED", "NO_EFFECT", "CANCELLED", "FAILED"}:
+        summary = str(getattr(item, "notes", "") or current_result or f"结果：{result_label}")
+        if summary:
+            done.append(summary)
+        current_result = summary
+        next_step = ""
+
+    if not current_result:
+        current_result = str(getattr(item, "judgment", "") or getattr(item, "finding", "") or "")
+
+    thread.done_json = _json_dumps_list(done) if done else None
+    thread.doing_json = _json_dumps_list(doing) if doing else None
+    thread.next_step = next_step or None
+    thread.current_result = current_result or None
+    thread.ai_judgment = str(getattr(item, "judgment", "") or getattr(item, "finding", "") or "") or None
+    thread.needs_owner = needs_owner
+    db.add(thread)
+    db.flush()
+    return thread
+
+
+def _evidence_rows(item: Any) -> list[dict[str, Any]]:
+    raw = getattr(item, "evidence_json", None)
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []

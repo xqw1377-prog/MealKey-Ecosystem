@@ -13,9 +13,11 @@ from app.models.entities import Menu, MenuItem, MenuItemVersion, Store
 from app.models.settings import PlatformConnection
 from app.schemas.settings import (
     AssistAskRequest,
+    LoopEvidenceInput,
     MenuSettingsUpdate,
     OwnerProfileUpdate,
     PlatformConnectRequest,
+    StoreOpsRosterUpdate,
     StoreSettingsUpdate,
     SystemSettingsUpdate,
 )
@@ -23,7 +25,7 @@ from app.services.ai_assist import answer_assist_question, assist_deploy, assist
 from app.services.daily_job import run_daily_job
 from app.services.llm_engine.gateway import llm_status
 from app.services.platform_connectors import list_platforms
-from app.services.platform_sync import sync_store_platform
+from app.services.platform_sync import sync_all_platforms, sync_store_platform
 from app.services.settings_store import EDITABLE_KEYS, get_setting, list_system_settings, upsert_setting
 
 router = APIRouter()
@@ -168,7 +170,11 @@ def settings_overview(store_id: str | None = Query(default=None), db: Session = 
         raise HTTPException(status_code=404, detail="store not found")
     checklist = build_setup_checklist(db, store)
     platforms = []
+    store_ops = None
     if store:
+        from app.services.store_ops import load_roster
+
+        store_ops = load_roster(db, store.id)
         connections = db.execute(
             select(PlatformConnection).where(PlatformConnection.store_id == store.id)
         ).scalars().all()
@@ -188,6 +194,7 @@ def settings_overview(store_id: str | None = Query(default=None), db: Session = 
         "store": _store_settings_payload(store) if store else None,
         "menu": _menu_settings_payload(db, store.id) if store else None,
         "owner": _load_owner_profile(db, store) if store else None,
+        "store_ops": store_ops,
         "system": list_system_settings(db, _env_fallback()),
         "platforms": platforms,
         "available_platforms": list_platforms(),
@@ -243,6 +250,27 @@ def update_store_settings(store_id: str, payload: StoreSettingsUpdate, db: Sessi
         "store": _store_settings_payload(store),
         "checklist": build_setup_checklist(db, store),
     }
+
+
+@router.get("/stores/{store_id}/ops-roster")
+def get_ops_roster(store_id: str, db: Session = Depends(get_db)):
+    store = _load_store(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    from app.services.store_ops import load_roster
+
+    return load_roster(db, store.id)
+
+
+@router.put("/stores/{store_id}/ops-roster")
+def update_ops_roster(store_id: str, payload: StoreOpsRosterUpdate, db: Session = Depends(get_db)):
+    store = _load_store(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    from app.services.store_ops import save_roster
+
+    roster = save_roster(db, store.id, payload.model_dump())
+    return {"store_ops": roster, "checklist": build_setup_checklist(db, store)}
 
 
 @router.get("/stores/{store_id}/owner")
@@ -421,6 +449,35 @@ def connect_platform(store_id: str, payload: PlatformConnectRequest, db: Session
         else None,
         "checklist": build_setup_checklist(db, store),
         "message": "平台数据已同步" + ("，并完成诊断刷新" if daily else ""),
+    }
+
+
+@router.post("/stores/{store_id}/platforms/sync-all")
+def sync_all_store_platforms(
+    store_id: str,
+    run_daily_job_flag: bool = Query(default=True, alias="run_daily_job"),
+    db: Session = Depends(get_db),
+):
+    store = _load_store(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    try:
+        result = sync_all_platforms(db, store)
+    except ValueError as exc:
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    daily = run_daily_job(db=db, store_id=store_id, days=7) if run_daily_job_flag else None
+    db.commit()
+    return {
+        "sync": result,
+        "daily_job": {
+            "observations": len(daily.observations) if daily else 0,
+            "top_actions": len(daily.top_actions) if daily else 0,
+        }
+        if daily
+        else None,
+        "checklist": build_setup_checklist(db, store),
+        "message": "多平台数据已合并同步" + ("，并完成诊断刷新" if daily else ""),
     }
 
 

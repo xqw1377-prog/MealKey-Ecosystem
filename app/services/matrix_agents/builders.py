@@ -222,8 +222,22 @@ def build_ads_agent(
     signals: list[AgentSignal] = []
     actions = []
     blockers = []
+    ads_observed = bool(getattr(data, "ads_observed", False))
 
-    if not unlock:
+    if not ads_observed:
+        unlock = False
+        blockers.append("还没有真实投流数据，不能把加投当实战建议。请先导入推广报表。")
+        signals.append(
+            AgentSignal(
+                code="ads_data_missing",
+                title="投流数据不足",
+                detail="没有 AdSpend 读数时，加投建议只是猜测。先导入推广花费/点击/订单。",
+                severity="high",
+                evidence=["ads_observed=false"],
+            )
+        )
+
+    elif not unlock:
         blockers.append("自然 CTR/CVR 仍不稳，先修商品与装修，再开投流。")
         signals.append(
             AgentSignal(

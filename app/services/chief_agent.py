@@ -456,6 +456,12 @@ def _execute_write_tool(
                 ),
             )
             db.add(rec)
+            db.flush()
+
+            # 绑定 work_thread_id
+            from app.services.thread_engine import ensure_thread_for_action
+            thread = ensure_thread_for_action(db, store_id, object_name or "经营优化")
+            rec.work_thread_id = thread.id
             db.commit()
             db.refresh(rec)
             return {
@@ -463,6 +469,7 @@ def _execute_write_tool(
                 "tool": "prepare_action",
                 "message": f"已准备好动作「{object_name}」，进入'现在需要你'队列，等老板确认后执行。",
                 "recommendation_id": rec.id,
+                "work_thread_id": thread.id,
             }
 
         if tool_name == "start_thread":
@@ -481,10 +488,10 @@ def _execute_write_tool(
         if tool_name == "connect_platform":
             platform = arguments.get("platform", "meituan")
             # 尝试 OAuth（如果配置了）
-            from app.services.platform_oauth import get_oauth_url, is_oauth_configured
+            from app.services.platform_oauth import build_oauth_state, get_oauth_url, is_oauth_configured
 
             if is_oauth_configured(platform):
-                url = get_oauth_url(platform, state=store_id)
+                url = get_oauth_url(platform, state=build_oauth_state(platform, store_id=store_id))
                 return {
                     "ok": True,
                     "tool": "connect_platform",
@@ -774,6 +781,25 @@ def _rule_fallback(
         answer += "依据：" + "；".join(reasons[:2]) + "\n"
     if actions:
         answer += "建议：" + "；".join(actions)
+
+    # 检索经典案例辅助判断(OCI 引擎 + Golden Cases 双通道)
+    try:
+        from app.services.oci.case_retrieval import retrieve_case_priors
+        intent_upper = intent.upper() if intent else ""
+        family_map = {"product": "product", "traffic": "ads", "profit": "profit",
+                       "review": "review", "growth": "campaign", "competition": "product"}
+        family = family_map.get(intent, "")
+        priors = retrieve_case_priors(
+            demand_code=intent_upper, family=family, question=question, limit=1
+        )
+        if priors:
+            top = priors[0]
+            case_id = top.get("case_id", "")
+            principle = top.get("principle") or top.get("action_pattern") or ""
+            if principle:
+                answer += f"\n\n📊 经验参考({case_id}): {str(principle)[:80]}"
+    except Exception:  # noqa: BLE001
+        pass
 
     return ChiefAgentResponse(
         question=question,

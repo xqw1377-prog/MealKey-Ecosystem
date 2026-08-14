@@ -35,6 +35,7 @@ DecisionActionKind = Literal[
     "event_decision",
     "scroll",
     "focus_intent",
+    "upload_cost",
 ]
 
 

@@ -7,9 +7,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
+
+
+def local_now() -> datetime:
+    """上海时区；无 tzdata 时退回本机时区，避免 Windows 启动即崩。"""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("Asia/Shanghai"))
+    except Exception:  # noqa: BLE001
+        return datetime.now().astimezone()
 
 
 @dataclass

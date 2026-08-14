@@ -602,6 +602,7 @@ def build_manager_home_brief(
         take_home_rate=state.profit.take_home_rate,
         take_home_rate_delta_pct=state.profit.take_home_rate_delta_pct,
         data_quality=state.profit.data_quality,
+        missing_blocks=state.profit.missing_blocks,
         judgment=state.profit.judgment or "",
     )
 

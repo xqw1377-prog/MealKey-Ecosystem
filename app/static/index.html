@@ -9,9 +9,11 @@
     <title>MealKey 餐启｜外卖智慧经营</title>
     <link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml" />
     <!-- 视觉主轨：mk-home-v2 最后加载，覆盖旧舱样式；app/mk-home 仅作模块页底盘 -->
-    <link rel="stylesheet" href="/static/app.css" />
-    <link rel="stylesheet" href="/static/mk-home.css" />
-    <link rel="stylesheet" href="/static/mk-home-v2.css" />
+    <!-- CSS: app.css=基础布局, mk-home.css=经营首页V1(171个独有选择器), mk-home-v2.css=设计稿对齐覆盖层 -->
+    <!-- 注意: v1 不能直接删除,v2 未覆盖全部 v1 选择器;合并需引入构建工具(P1) -->
+    <link rel="stylesheet" href="/static/app.css?v=20260813i" />
+    <link rel="stylesheet" href="/static/mk-home.css?v=20260813i" />
+    <link rel="stylesheet" href="/static/mk-home-v2.css?v=20260813i" />
   </head>
   <body class="view-home">
     <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
@@ -102,13 +104,13 @@
         </div>
 
         <div class="sidebar-footer">
-          <div class="sidebar-owner">
+          <button type="button" class="sidebar-owner" id="sidebarOwnerBtn" title="账号与账单" aria-label="打开账号与账单">
             <div class="profile-avatar" id="sidebarOwnerAvatar">店</div>
             <div class="profile-meta">
               <strong id="sidebarOwnerName">老板</strong>
               <span id="profileStoreName">门店加载中</span>
             </div>
-          </div>
+          </button>
           <button class="sidebar-foot-link" id="openHelpBtn" type="button">不会用？让 AI 带我走一遍</button>
         </div>
       </aside>
@@ -152,7 +154,7 @@
                   <span class="mk-badge" id="mkNeedBadge" hidden>0</span>
                   <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 2.5a3.2 3.2 0 0 0-3.2 3.2v1.1c0 1.3-.4 2.5-1.2 3.5l-.7.9a1.2 1.2 0 0 0 1 1.8h8.2a1.2 1.2 0 0 0 1-1.8l-.7-.9a5.8 5.8 0 0 1-1.2-3.5V5.7A3.2 3.2 0 0 0 10 2.5Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8.2 16.2a1.8 1.8 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                 </button>
-                <button class="mk-profile-chip" id="mkOwnerAvatar" type="button" title="修改个人信息" aria-label="修改个人信息">
+                <button class="mk-profile-chip" id="mkOwnerAvatar" type="button" title="账号与账单" aria-label="打开账号与账单">
                   <span class="mk-avatar" id="mkOwnerAvatarFace">王</span>
                   <span class="mk-owner-name" id="mkOwnerName">老板</span>
                   <span class="mk-profile-caret" aria-hidden="true">▾</span>
@@ -171,6 +173,7 @@
               <div class="mk-chat-stage" id="mkChatStage">
                 <!-- Safe Mode：路径入口（放在 guide 外，聊天态也可见可点） -->
                 <button type="button" class="mk-safe-mode-path" id="mkSafeModeBanner" hidden></button>
+                <button type="button" class="mk-safe-mode-path mk-wallet-path" id="mkWalletBanner" hidden></button>
                 <div class="mk-guide-area" id="mkGuideArea" aria-live="polite">
                   <div class="mk-guide-progress" id="mkGuideProgress" hidden></div>
                   <div class="mk-guide-body" id="mkDecisionHost"></div>
@@ -262,8 +265,14 @@
                 <div class="command-bar-tools" id="commandBarTools">
                   <button type="button" class="command-bar-tool" id="commandBarLiveVoiceBtn">实时说一句</button>
                   <button type="button" class="command-bar-tool" id="commandBarAudioToolBtn">上传音频转写</button>
+                  <button type="button" class="command-bar-tool" id="commandBarCostBtn">上传成本表</button>
+                  <button type="button" class="command-bar-tool" id="commandBarImportBtn">导入经营数据</button>
+                  <button type="button" class="command-bar-tool" id="commandBarPosterBtn">促销海报</button>
                 </div>
                 <p class="command-bar-attach-hint" hidden>支持图片 / 文档 / 表格，MealKey 会自己读</p>
+                <div class="mk-data-coverage" id="mkDataCoveragePanel"></div>
+                <div class="mk-ads-summary" id="mkAdsSummaryPanel" style="display:none;"></div>
+                <div class="mk-ads-summary" id="mkCostItemsPanel" style="display:none;"></div>
                 <div class="command-bar-chips" id="commandBarChips">
                   <button type="button" data-assist-prompt="这个月做到20万营业额">这个月做到20万</button>
                   <button type="button" data-assist-prompt="利润太低了，先帮我找原因和动作">利润太低了</button>
@@ -275,6 +284,8 @@
                 <button type="button" class="command-bar-examples" id="commandBarExamplesBtn" hidden>示例问题 ›</button>
                 <input id="commandBarFileInput" type="file" multiple hidden />
                 <input id="commandBarAudioInput" type="file" accept="audio/*" multiple hidden />
+                <input id="commandBarCostInput" type="file" accept=".csv,.json,.xlsx,.xls" hidden />
+                <input id="commandBarImportInput" type="file" accept=".csv,.json,.xlsx,.xls" hidden />
                 <button type="button" class="mk-expert-mode" id="mkExpertModeBtn" data-scroll-target="section-settings" title="设置与高级面板（Escape Hatch）">设置</button>
                 <button type="button" class="mk-expert-mode" id="mkIntakeBtn" title="从资料新建门店">新增门店</button>
               </div>
@@ -765,6 +776,26 @@
                   <button class="topbar-button primary" type="submit">保存门店资料</button>
                 </form>
 
+                <form class="settings-card" id="storeOpsForm">
+                  <div class="product-panel-title">门店执行人（线下整改）</div>
+                  <p class="settings-card-hint">出餐、补货、包装、漏餐这类事要派给店长。没有证据不能点「已做完」。保存后会生成门店任务页，发给店长即可。</p>
+                  <div class="settings-form-grid">
+                    <label>店长姓名<input name="manager_name" placeholder="如：李姐" required /></label>
+                    <label>店长电话<input name="manager_phone" placeholder="选填" /></label>
+                    <label>通知方式
+                      <select name="notify_channel">
+                        <option value="owner_relay">先通知老板，再转给店长</option>
+                        <option value="phone">电话/短信联系店长</option>
+                        <option value="wechat">微信通知（需配置）</option>
+                      </select>
+                    </label>
+                    <label>班次备注<input name="shift_note" placeholder="如：午班 10:00-14:00" /></label>
+                    <label class="span-2">门店任务页<input name="task_url" readonly placeholder="保存后自动生成" /></label>
+                  </div>
+                  <button class="topbar-button primary" type="submit">保存执行人</button>
+                  <button class="topbar-button" type="button" id="copyStoreTaskLinkBtn">复制任务页发给店长</button>
+                </form>
+
                 <form class="settings-card" id="menuSettingsForm">
                   <div class="product-panel-title">菜单基础数据</div>
                   <p class="settings-card-hint">每行一个菜：名称|品类|价格。也可用上方「一键演示对接」自动导入。</p>
@@ -795,6 +826,7 @@
                       <option value="mobile">手机连接码</option>
                     </select>
                     <button class="topbar-button primary" type="button" id="settingsConnectPlatformBtn">连接 / 同步</button>
+                    <button class="topbar-button" type="button" id="settingsCollectIntelBtn">采集官网政策与活动</button>
                   </div>
                 </div>
               </div>
@@ -805,10 +837,11 @@
                 <div>
                   <div class="section-kicker">数据采集 Agent · L1 感知层</div>
                   <h2>公开数据采集中心</h2>
-                  <p>13 Agent 团队的眼睛：连接商家手机端可见页面，持续采集竞品菜品、价格、公开销量与变化证据。</p>
+                  <p>公开页眼睛：竞品菜单价格之外，定时采集美团/饿了么/京东/淘宝闪购官网政策与促销。不爬商家后台。</p>
                 </div>
                 <div class="collection-head-actions">
                   <div class="collection-live-status" id="collectionLiveStatus">正在检查连接状态</div>
+                  <button class="topbar-button" type="button" id="collectPlatformIntelBtn">采集官网政策与活动</button>
                   <button class="topbar-button primary" id="openCollectionConnectBtn">连接新平台</button>
                 </div>
               </div>
@@ -877,6 +910,18 @@
                   </div>
                   <div class="collection-change-list" id="collectionChangeList"></div>
                 </div>
+              </div>
+
+              <div class="collection-monitor-panel platform-intel-panel">
+                <div class="collection-subhead">
+                  <div>
+                    <h3>官网政策与促销</h3>
+                    <p>只采公开新闻/规则/招商页。失败如实记录，不会假装有活动。老板问「最近有什么活动」由店长接手。</p>
+                  </div>
+                  <div class="side-tag" id="platformIntelCount">0 条</div>
+                </div>
+                <div class="collection-run-list" id="platformIntelRunStatus"></div>
+                <div class="collection-change-list" id="platformIntelList"></div>
               </div>
             </section>
               </div>
@@ -969,8 +1014,8 @@
       <section class="profile-modal-panel" role="dialog" aria-modal="true" aria-labelledby="ownerProfileTitle">
         <div class="profile-modal-head">
           <div>
-            <div class="section-kicker">个人资料</div>
-            <h2 id="ownerProfileTitle">修改用户信息</h2>
+            <div class="section-kicker">账号与账单</div>
+            <h2 id="ownerProfileTitle">个人资料</h2>
           </div>
           <button class="profile-modal-close" type="button" data-profile-modal-close aria-label="关闭">×</button>
         </div>
@@ -1007,9 +1052,36 @@
           <p class="profile-store-hint">当前门店：<strong id="ownerProfileStoreName">—</strong></p>
           <div class="profile-modal-actions">
             <button type="button" class="topbar-button" data-profile-modal-close>取消</button>
-            <button type="submit" class="topbar-button primary" id="ownerProfileSaveBtn">保存</button>
+            <button type="submit" class="topbar-button primary" id="ownerProfileSaveBtn">保存资料</button>
           </div>
         </form>
+        <section class="profile-bill" id="ownerBillPanel" aria-label="经营账单">
+          <div class="profile-bill-head">
+            <strong>经营服务费</strong>
+            <span id="ownerBillStoreHint">按活跃门店数计价</span>
+          </div>
+          <p class="profile-bill-lead" id="ownerBillLead">门店越多越优惠，买得越久越优惠。没有券，也没有套餐迷宫。</p>
+          <div class="profile-cycle-grid" id="ownerBillCycles">
+            <p class="profile-bill-empty">账单加载中…</p>
+          </div>
+          <div class="profile-bill-head" style="margin-top:16px;">
+            <strong>AI 算力储值</strong>
+            <span>只看人民币，不看 Token</span>
+          </div>
+          <div class="profile-wallet" id="ownerBillWallet">
+            <div class="profile-wallet-stat">
+              <em>余额</em>
+              <strong id="ownerWalletBalance">¥0</strong>
+            </div>
+            <div class="profile-wallet-stat">
+              <em>本月已用</em>
+              <strong id="ownerWalletUsed">¥0</strong>
+            </div>
+          </div>
+          <div class="profile-topup-btns" id="ownerWalletTopups"></div>
+          <div class="profile-transfer" id="ownerBillTransfer" hidden></div>
+          <p class="profile-bill-note" id="ownerBillNote">演示环境直接入账，不走真实支付。</p>
+        </section>
       </section>
     </div>
 
@@ -1089,14 +1161,26 @@
       </section>
     </div>
 
-    <script src="/static/js/00-state.js" defer></script>
-    <script src="/static/js/01-utils.js" defer></script>
-    <script src="/static/js/02-api.js" defer></script>
-    <script src="/static/js/03-nav.js" defer></script>
-    <script src="/static/js/04-home.js" defer></script>
-    <script src="/static/js/05-dashboard.js" defer></script>
-    <script src="/static/js/06-actions.js" defer></script>
-    <script src="/static/js/07-events.js" defer></script>
-    <script src="/static/js/08-init.js" defer></script>
+    <div id="mkAuthGate" class="mk-auth-gate" hidden>
+      <form id="mkAuthGateForm" class="mk-auth-card">
+        <img class="brand-mark" src="/static/brand/mealkey-mark.svg" width="32" height="32" alt="MealKey 餐启" />
+        <h2>进入店长工作台</h2>
+        <p id="mkAuthGateHint">本机已开启访问口令。输入后进入，不会把口令发给平台。</p>
+        <label for="mkAuthTokenInput">访问口令</label>
+        <input id="mkAuthTokenInput" name="api_token" type="password" autocomplete="current-password" placeholder="本机配置的访问口令" />
+        <button class="topbar-button primary" type="submit">进入</button>
+      </form>
+    </div>
+
+    <script src="/static/js/00-state.js?v=20260813i" defer></script>
+    <script src="/static/js/01-utils.js?v=20260813i" defer></script>
+    <script src="/static/js/02-api.js?v=20260813i" defer></script>
+    <script src="/static/js/03-nav.js?v=20260813i" defer></script>
+    <script src="/static/js/04-home.js?v=20260813i" defer></script>
+    <script src="/static/js/05-dashboard.js?v=20260813i" defer></script>
+    <script src="/static/js/06-actions.js?v=20260813i" defer></script>
+    <script src="/static/js/07-events.js?v=20260813i" defer></script>
+    <script src="/static/js/09-decision.js?v=20260813i" defer></script>
+    <script src="/static/js/08-init.js?v=20260813i" defer></script>
   </body>
 </html>

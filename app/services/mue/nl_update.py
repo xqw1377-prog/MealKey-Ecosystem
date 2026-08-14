@@ -8,6 +8,16 @@ from typing import Optional
 from app.schemas.merchant_understanding import MerchantUnderstanding, UnderstandingUpdateResult
 
 
+_PRIORITY_CHIPS: dict[str, str] = {
+    "多一点订单": "orders",
+    "多点订单": "orders",
+    "提高利润": "profit",
+    "提高排名": "rank",
+    "帮我平衡": "balanced",
+    "你帮我平衡": "balanced",
+}
+
+
 def apply_nl_update(understanding: MerchantUnderstanding, text: str) -> Optional[UnderstandingUpdateResult]:
     """识别设置类原话；无法识别返回 None。"""
     raw = (text or "").strip()
@@ -17,8 +27,26 @@ def apply_nl_update(understanding: MerchantUnderstanding, text: str) -> Optional
     changed: list[str] = []
     replies: list[str] = []
 
-    # —— 经营原则 ——
-    if re.search(r"(利润优先|先赚钱|别.*(冲|冲单|瞎冲)|少点优惠|宁愿少点单)", raw):
+    chip_style = _PRIORITY_CHIPS.get(raw)
+    if chip_style is None and len(raw) <= 16:
+        for label, value in _PRIORITY_CHIPS.items():
+            if label in raw:
+                chip_style = value
+                break
+    if chip_style:
+        understanding.preferences.priority_style = chip_style
+        changed.append("priority_style")
+        replies.append(
+            {
+                "profit": "明白。以后经营原则：利润优先，不为了 GMV 做明显亏损的活动。",
+                "orders": "明白。我会更积极争量，同时盯住明显亏损的活动。",
+                "rank": "明白。排名相关动作会优先，但仍避开不可逆的大亏。",
+                "balanced": "好。我会在利润与订单之间自己平衡，偏离太大时再找你。",
+            }[chip_style]
+        )
+        _close_gap(understanding, "priority_style")
+
+    elif re.search(r"(利润优先|提高利润|先赚钱|别.*(冲|冲单|瞎冲)|少点优惠|宁愿少点单)", raw):
         understanding.preferences.priority_style = "profit"
         understanding.preferences.promotion_aggressiveness = min(
             understanding.preferences.promotion_aggressiveness, 0.35

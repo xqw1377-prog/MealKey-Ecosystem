@@ -16,10 +16,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.entities import ItemFunnelDaily
+from app.models.entities import ItemFunnelDaily, ReviewFact
 from app.models.ohre import Experiment, Recommendation
 from app.services.store_state import build_store_state
 from app.services.strategy_memory import upsert_strategy_memory_from_experiment
@@ -71,7 +71,50 @@ def _item_metric_value(
         return (visits / impressions) if impressions else None
     if metric == "cvr":
         return (orders / visits) if visits else None
+    if metric == "rating":
+        return _item_rating(db, item_id, from_day, to_day)
     return None
+
+
+def _item_rating(db: Session, item_id: str, from_day, to_day) -> Optional[float]:
+    start = datetime.combine(from_day, datetime.min.time(), tzinfo=timezone.utc)
+    end = datetime.combine(to_day, datetime.max.time(), tzinfo=timezone.utc)
+    val = db.execute(
+        select(func.avg(ReviewFact.rating)).where(
+            ReviewFact.item_id == item_id,
+            ReviewFact.reviewed_at >= start,
+            ReviewFact.reviewed_at <= end,
+            ReviewFact.rating.is_not(None),
+        )
+    ).scalar()
+    return float(val) if val is not None else None
+
+
+def _item_funnel_observed(db: Session, item_id: str, from_day, to_day) -> bool:
+    count = db.execute(
+        select(func.count()).select_from(ItemFunnelDaily).where(
+            ItemFunnelDaily.item_id == item_id,
+            ItemFunnelDaily.day >= from_day,
+            ItemFunnelDaily.day <= to_day,
+            or_(ItemFunnelDaily.data_source.is_(None), ItemFunnelDaily.data_source != "synthetic"),
+        )
+    ).scalar() or 0
+    return count > 0
+
+
+def _mark_unknown(experiment: Experiment, reason: str, note: str) -> AttributionOutcome:
+    experiment.result = "unknown"
+    experiment.attribution_quality = "low"
+    experiment.notes = note
+    experiment.lift_pct = None
+    return AttributionOutcome(
+        experiment_id=experiment.id,
+        store_id=experiment.store_id,
+        result="unknown",
+        lift_pct=None,
+        skipped=True,
+        reason=reason,
+    )
 
 
 def _classify(lift_pct: Optional[float]) -> tuple[str, str]:
@@ -129,9 +172,18 @@ def evaluate_experiment(
     baseline = experiment.baseline_value
     observed: Optional[float] = None
     attribution_scope = "store"
+    funnel_metrics = {"ctr", "cvr", "impressions"}
 
     if experiment.item_id:
         attribution_scope = "item"
+        if metric_name in funnel_metrics and not _item_funnel_observed(
+            db, experiment.item_id, state.window.from_day, state.window.to_day
+        ):
+            return _mark_unknown(
+                experiment,
+                "funnel_missing",
+                "缺少真实商品漏斗，无法自动判定这次动作的结果。",
+            )
         observed = _item_metric_value(
             db, experiment.item_id, metric_name, state.window.from_day, state.window.to_day
         )
@@ -144,6 +196,14 @@ def evaluate_experiment(
                 state.window.compare_to_day,
             )
     else:
+        if metric_name in funnel_metrics:
+            metric = state.kpis.get(metric_name)
+            if metric is None or metric.observed_value is None:
+                return _mark_unknown(
+                    experiment,
+                    "funnel_missing",
+                    "缺少门店漏斗读数，无法自动判定这次动作的结果。",
+                )
         metric = state.kpis.get(metric_name)
         if baseline is None:
             baseline = metric.baseline_value if metric else None
@@ -169,6 +229,54 @@ def evaluate_experiment(
 
     result, note = _classify(lift_pct)
     scope_label = "商品漏斗" if attribution_scope == "item" else "门店 KPI"
+
+    # ── 护栏检查:不只看主指标,还要检查利润/投流是否恶化 ──
+    guardrail_warnings: list[str] = []
+    try:
+        # 检查利润护栏:到手率是否下降
+        profit_now = state.profit
+        if profit_now and profit_now.take_home_rate is not None:
+            # 如果到手率低于 50%,即使主指标涨了也可能在买流水
+            if profit_now.take_home_rate < 0.5:
+                guardrail_warnings.append(
+                    f"到手率仅 {profit_now.take_home_rate:.0%},可能为了冲量牺牲了利润"
+                )
+                if result == "positive":
+                    note += "(但到手率偏低,注意利润)"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 检查投流护栏:CPC 是否在实验期间上涨
+    try:
+        from app.models.business_facts import AdSpendDaily
+
+        ads_rows = list(
+            db.execute(
+                select(AdSpendDaily)
+                .where(
+                    AdSpendDaily.store_id == experiment.store_id,
+                    AdSpendDaily.day >= state.window.from_day,
+                    AdSpendDaily.day <= state.window.to_day,
+                )
+                .order_by(AdSpendDaily.day)
+            ).scalars()
+        )
+        if len(ads_rows) >= 2:
+            cpc_first = ads_rows[0].cpc
+            cpc_last = ads_rows[-1].cpc
+            if cpc_first and cpc_last and cpc_first > 0:
+                cpc_change = (cpc_last - cpc_first) / cpc_first * 100
+                if cpc_change > 15:
+                    guardrail_warnings.append(
+                        f"实验期间 CPC 上涨 {cpc_change:.0f}%,投流成本在恶化"
+                    )
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 如果护栏告警,降级 positive → neutral
+    if guardrail_warnings and result == "positive":
+        result = "neutral"
+        note = note + "。" + ";".join(guardrail_warnings)
 
     experiment.baseline_value = baseline
     experiment.observed_value = observed

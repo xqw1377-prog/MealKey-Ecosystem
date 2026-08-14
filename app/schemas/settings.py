@@ -61,3 +61,16 @@ class OwnerProfileUpdate(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=32)
     role: Optional[str] = Field(default="老板", max_length=40)
     avatar_data_url: Optional[str] = Field(default=None, max_length=240_000)
+
+
+class StoreOpsRosterUpdate(BaseModel):
+    manager_name: str = Field(default="", max_length=40)
+    manager_phone: Optional[str] = Field(default=None, max_length=32)
+    notify_channel: Optional[str] = Field(default="owner_relay", max_length=24)
+    shift_note: Optional[str] = Field(default="", max_length=80)
+
+
+class LoopEvidenceInput(BaseModel):
+    kind: str = Field(default="note", max_length=24)
+    note: str = Field(default="", max_length=400)
+    data_url: Optional[str] = Field(default=None, max_length=240_000)

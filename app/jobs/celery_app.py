@@ -25,6 +25,17 @@ celery_app.conf.update(
                 minute=settings.competition_collection_minute,
             ),
         },
+        "collect-platform-intel-daily": {
+            "task": "platform_intel.collect_official",
+            "schedule": crontab(
+                hour=settings.platform_intel_hour,
+                minute=settings.platform_intel_minute,
+            ),
+        },
+        "diff-p0-rule-sources-weekly": {
+            "task": "oci.diff_p0_rules",
+            "schedule": crontab(hour=6, minute=20, day_of_week="sun"),
+        },
         "run-daily-job-all-stores": {
             "task": "ops.run_daily_job_all_stores",
             "schedule": crontab(

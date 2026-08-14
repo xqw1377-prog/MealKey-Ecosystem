@@ -40,6 +40,78 @@ EDITABLE_KEYS: dict[str, dict[str, Any]] = {
         "description": "调用平台适配服务时的鉴权 Token",
         "group": "platform",
     },
+    "oauth_meituan_client_id": {
+        "label": "美团 OAuth Client ID",
+        "is_secret": False,
+        "description": "美团开放平台应用 Client ID",
+        "group": "platform",
+    },
+    "oauth_meituan_client_secret": {
+        "label": "美团 OAuth Client Secret",
+        "is_secret": True,
+        "description": "美团开放平台应用 Client Secret",
+        "group": "platform",
+    },
+    "oauth_meituan_redirect_uri": {
+        "label": "美团 OAuth Redirect URI",
+        "is_secret": False,
+        "description": "美团开放平台回调地址",
+        "group": "platform",
+    },
+    "oauth_meituan_auth_url": {
+        "label": "美团 OAuth 授权地址",
+        "is_secret": False,
+        "description": "默认值可覆盖，便于正式环境切换",
+        "group": "platform",
+    },
+    "oauth_meituan_token_url": {
+        "label": "美团 OAuth 换票地址",
+        "is_secret": False,
+        "description": "授权码换 token 地址",
+        "group": "platform",
+    },
+    "oauth_meituan_scope": {
+        "label": "美团 OAuth Scope",
+        "is_secret": False,
+        "description": "授权范围，空则使用默认值",
+        "group": "platform",
+    },
+    "oauth_eleme_client_id": {
+        "label": "饿了么 OAuth Client ID",
+        "is_secret": False,
+        "description": "饿了么开放平台应用 Client ID",
+        "group": "platform",
+    },
+    "oauth_eleme_client_secret": {
+        "label": "饿了么 OAuth Client Secret",
+        "is_secret": True,
+        "description": "饿了么开放平台应用 Client Secret",
+        "group": "platform",
+    },
+    "oauth_eleme_redirect_uri": {
+        "label": "饿了么 OAuth Redirect URI",
+        "is_secret": False,
+        "description": "饿了么开放平台回调地址",
+        "group": "platform",
+    },
+    "oauth_eleme_auth_url": {
+        "label": "饿了么 OAuth 授权地址",
+        "is_secret": False,
+        "description": "默认值可覆盖，便于正式环境切换",
+        "group": "platform",
+    },
+    "oauth_eleme_token_url": {
+        "label": "饿了么 OAuth 换票地址",
+        "is_secret": False,
+        "description": "授权码换 token 地址",
+        "group": "platform",
+    },
+    "oauth_eleme_scope": {
+        "label": "饿了么 OAuth Scope",
+        "is_secret": False,
+        "description": "授权范围，空则使用默认值",
+        "group": "platform",
+    },
     "competition_partner_api_url": {
         "label": "竞品数据 Partner URL",
         "is_secret": False,
@@ -51,6 +123,12 @@ EDITABLE_KEYS: dict[str, dict[str, Any]] = {
         "is_secret": True,
         "description": "竞品数据源鉴权",
         "group": "competition",
+    },
+    "platform_intel_sources_json": {
+        "label": "官网政策/活动采集源",
+        "is_secret": False,
+        "description": "额外公开页 JSON，仅 https。禁止商家后台。例：[{\"platform\":\"meituan\",\"name\":\"规则中心\",\"url\":\"https://...\",\"kind_hint\":\"policy\"}]",
+        "group": "platform",
     },
     "asr_service_url": {
         "label": "ASR 服务地址",
@@ -141,6 +219,29 @@ def upsert_setting(
         db.add(row)
     db.flush()
     return row
+
+
+def set_setting(
+    key: str,
+    value: str | None,
+    *,
+    is_secret: bool = False,
+    description: str | None = None,
+) -> AppSetting:
+    session = SessionLocal()
+    try:
+        row = upsert_setting(
+            session,
+            key,
+            value,
+            is_secret=is_secret,
+            description=description,
+        )
+        session.commit()
+        session.refresh(row)
+        return row
+    finally:
+        session.close()
 
 
 def list_system_settings(db: Session, env_fallback: dict[str, str | None]) -> list[dict[str, Any]]:

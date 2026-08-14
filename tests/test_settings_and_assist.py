@@ -6,6 +6,16 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_public_config_exposes_auth_and_llm() -> None:
+    config = client.get("/public/config")
+    assert config.status_code == 200
+    body = config.json()
+    assert "llm" in body
+    assert "auth" in body
+    assert body["auth"]["mode"] in {"api_token", "dev_open"}
+    assert "configured" in body["llm"]
+
+
 def test_settings_overview_and_store_update() -> None:
     seed = client.post("/dev/seed")
     assert seed.status_code == 200

@@ -57,6 +57,11 @@ class CompetitionChange(BaseModel):
 class FeedbackInfo(BaseModel):
     keywords: list[dict] = Field(default_factory=list)
     scores: dict = Field(default_factory=dict)
+    # 差评闭环信号
+    recent_review_count: int = 0
+    recent_bad_review_count: int = 0  # 近期 1-3 星评价数
+    bad_review_rate: Optional[float] = None  # 差评占比
+    recent_bad_reviews: list[dict] = Field(default_factory=list)  # [{rating, content, reviewed_at}]
 
 
 class PrimaryProblem(BaseModel):
@@ -117,6 +122,8 @@ class ProfitState(BaseModel):
     contribution_profit_delta_pct: Optional[float] = None
     contribution_profit_per_order: Optional[float] = None
     data_quality: Literal["observed", "proxy", "missing"] = "missing"
+    # UNKNOWN 一等状态:缺失的成本字段列表,驱动 Ask Engine
+    missing_blocks: list[str] = Field(default_factory=list)
     judgment: str = ""
 
 
@@ -164,6 +171,36 @@ class CustomerState(BaseModel):
     judgment: str = ""
 
 
+class DataCoverage(BaseModel):
+    """门店真实数据覆盖度。缺哪一块就诚实标出来，供 Ads/利润/归因 fail-closed。"""
+
+    funnel_days: int = 0
+    ads_days: int = 0
+    reviews: int = 0
+    order_rows: int = 0
+    items_with_cost: int = 0
+    synthetic_item_funnel: bool = False
+    ads_source: Literal["ad_spend_daily", "shop_funnel", "missing"] = "missing"
+    ads_observed: bool = False
+    orders_observed: bool = False
+
+
+class AdsSummary(BaseModel):
+    """投流摘要 — 从 AdSpendDaily 聚合,暴露给前端和 analyze_ads。"""
+    total_cost: Optional[float] = None
+    avg_daily_cost: Optional[float] = None
+    avg_cpc: Optional[float] = None
+    avg_roas: Optional[float] = None
+    avg_ctr: Optional[float] = None
+    total_clicks: Optional[int] = None
+    total_ads_orders: Optional[int] = None
+    cpc_trend_pct: Optional[float] = None  # CPC 变化百分比
+    roas_trend_pct: Optional[float] = None  # ROAS 变化百分比
+    days: int = 0
+    daily_rows: list[dict] = Field(default_factory=list)  # [{day, cost, clicks, cpc, roas}]
+    findings: list[str] = Field(default_factory=list)  # analyze_ads 的关键发现
+
+
 class StoreState(BaseModel):
     store: StoreInfo
     market: MarketInfo
@@ -179,6 +216,8 @@ class StoreState(BaseModel):
     profit: ProfitState = Field(default_factory=ProfitState)
     benchmark: BenchmarkState = Field(default_factory=BenchmarkState)
     customer: CustomerState = Field(default_factory=CustomerState)
+    data_coverage: DataCoverage = Field(default_factory=DataCoverage)
+    ads_summary: AdsSummary = Field(default_factory=AdsSummary)
     generated_at: Optional[datetime] = None
 
 
@@ -271,6 +310,7 @@ class ProfitSummaryBrief(BaseModel):
     take_home_rate: Optional[float] = None
     take_home_rate_delta_pct: Optional[float] = None
     data_quality: Literal["observed", "proxy", "missing"] = "missing"
+    missing_blocks: list[str] = Field(default_factory=list)
     judgment: str = ""
 
 

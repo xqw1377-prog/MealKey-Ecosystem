@@ -59,7 +59,7 @@ def chat_completion(
     messages: list[ChatMessage],
     temperature: float = 0.4,
     max_tokens: int = 2048,
-    timeout_seconds: int = 60,
+    timeout_seconds: int = 20,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
 ) -> ChatResult:

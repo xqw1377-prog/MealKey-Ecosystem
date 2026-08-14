@@ -30,6 +30,7 @@ _LOW_RISK_WRITEBACK = {
     "change_title",
     "change_main_image",
     "menu_patch",
+    "reply_ordinary_reviews",
 }
 
 _SKILL_TO_QUERY = {
@@ -257,6 +258,8 @@ def _compile_action(raw: str) -> CompiledIntent | None:
         return _action(raw, "change_title", dish or "商品标题", "writeback", "product", ready=True)
     if re.search(r"(回差评|差评回复|差评怎么回|批量回复)", raw):
         return _action(raw, "batch_reply_negative_reviews", "差评回复", "writeback", "service", ready=True)
+    if re.search(r"(回好评|好评回复|普通评价.{0,4}回|把好评回了)", raw):
+        return _action(raw, "reply_ordinary_reviews", "普通好评回复", "writeback", "service", ready=True)
     if re.search(r"(上套餐|做套餐|29元套餐|推出套餐)", raw):
         name = "29元套餐" if "29" in raw else (dish or "价值套餐")
         return _action(raw, "add_set_meal", name, "confirm", "menu", ready=True)
@@ -329,6 +332,16 @@ def _compile_ask(raw: str) -> CompiledIntent:
 
     skills = select_skills_for_question(raw)
     query = _AGENT_TO_QUERY.get(agent) or _SKILL_TO_QUERY.get(skills[0] if skills else "product", "query_growth")
+    slots: dict[str, Any] = {}
+    try:
+        from app.services.operating_demands.router import match_demand
+
+        demand = match_demand(raw)
+        if demand is not None:
+            slots["demand_code"] = demand.code
+            slots["demand_id"] = demand.id
+    except Exception:  # noqa: BLE001
+        slots = {}
     return CompiledIntent(
         kind="ask",
         raw_text=raw,
@@ -339,6 +352,7 @@ def _compile_ask(raw: str) -> CompiledIntent:
         object_name=raw[:40],
         detail=raw,
         execution_tier="draft",
+        slots=slots,
     )
 
 

@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from datetime import date
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.ohre import Experiment, Recommendation
-from app.models.strategy_memory import StrategyMemoryRecord
+from app.models.strategy_memory import MemoryChangedDecision, StrategyMemoryRecord
 from app.schemas.strategy_memory import ExperimentResultView, StrategyMemoryItem, StrategyMemorySnapshot
 
 
@@ -49,7 +51,7 @@ def build_experiment_result_view(
 
 
 def upsert_strategy_memory_from_experiment(db: Session, experiment: Experiment) -> StrategyMemoryRecord | None:
-    if experiment.result in {None, "pending"}:
+    if experiment.result in {None, "pending", "unknown"}:
         return None
     recommendation = db.execute(
         select(Recommendation).where(Recommendation.id == experiment.recommendation_id)
@@ -219,3 +221,39 @@ def load_cross_store_memory(
         "total_actions": len(knowledge),
         "principle": "跨店经验只作参考，单店实验仍优先。",
     }
+
+
+def record_memory_changed_decision(
+    db: Session,
+    *,
+    store_id: str,
+    action_type: str,
+    naive_mode: str,
+    learned_mode: str,
+    cause: str,
+    memory_result: str,
+    source: str = "execution_policy",
+) -> MemoryChangedDecision | None:
+    """同一店、同一动作、同一天只记一次：证明记忆改了判断，不是刷次数。"""
+    if not store_id or naive_mode == learned_mode:
+        return None
+    fingerprint = f"{store_id}:{action_type}:{naive_mode}:{learned_mode}:{date.today().isoformat()}"
+    existing = db.execute(
+        select(MemoryChangedDecision).where(MemoryChangedDecision.fingerprint == fingerprint)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    row = MemoryChangedDecision(
+        store_id=store_id,
+        fingerprint=fingerprint,
+        action_type=action_type,
+        naive_mode=naive_mode,
+        learned_mode=learned_mode,
+        cause=cause,
+        source=source,
+        memory_result=memory_result,
+    )
+    db.add(row)
+    db.flush()
+    return row
+

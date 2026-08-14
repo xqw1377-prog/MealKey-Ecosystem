@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>测一下我的店 · MealKey 餐启</title>
+  <link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg: #f4f2ec;
+      --ink: #1c1b1a;
+      --muted: #6f6554;
+      --line: #e6e0d4;
+      --accent: #c23a2b;
+      --gold: #c9a227;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 15px/1.55 "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .wrap { max-width: 440px; margin: 0 auto; padding: 28px 18px 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; color: var(--muted); font-size: 13px; }
+    .brand img { width: 28px; height: 28px; }
+    .card {
+      padding: 22px 20px 18px;
+      border-radius: 22px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 16px 40px rgba(28,28,28,.08);
+    }
+    .kicker { font-size: 12px; letter-spacing: .06em; color: var(--gold); font-weight: 700; }
+    h1 { margin: 8px 0 10px; font-size: 24px; letter-spacing: -.03em; }
+    .lift { color: var(--accent); font-weight: 800; }
+    .foot { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+    label { display: grid; gap: 6px; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      font: inherit;
+      color: var(--ink);
+    }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: var(--ink);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .findings { display: grid; gap: 8px; margin: 12px 0; }
+    .findings p { margin: 0; padding: 10px 12px; border-radius: 12px; background: #faf8f4; }
+    a.secondary {
+      display: block;
+      margin-top: 10px;
+      text-align: center;
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .err { color: var(--accent); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <img src="/static/brand/mealkey-mark.svg" alt="" />
+      <span>MealKey 餐启 · 结果卡</span>
+    </div>
+    <section class="card" id="card">加载中…</section>
+  </div>
+  <script>
+    const artifactId = location.pathname.split("/").filter(Boolean).pop();
+    const host = document.getElementById("card");
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderCard(card) {
+      const lift = card.lift_pct == null ? "" : `<span class="lift">${card.lift_pct > 0 ? "+" : ""}${Number(card.lift_pct).toFixed(1)}%</span>`;
+      host.innerHTML = `
+        <div class="kicker">同行刚做出的结果</div>
+        <h1>${escapeHtml(card.title)} ${lift}</h1>
+        <p class="foot">${escapeHtml(card.footnote || "不展示店名和营业额。")}</p>
+        <form id="auditForm">
+          <label>你的店名<input name="store_name" required maxlength="80" placeholder="例如：隔壁牛肉饭" /></label>
+          <label>城市<input name="city" maxlength="40" placeholder="选填" /></label>
+          <label>现在最头疼的事<input name="pain" maxlength="80" placeholder="例如：有曝光没转化" /></label>
+          <button type="submit">${escapeHtml(card.cta || "测一下我的店")}</button>
+        </form>
+        <p class="foot">免费诊断不超过 ¥${escapeHtml(card.audit_cap_cny || 5)} 算力。</p>
+      `;
+      document.getElementById("auditForm").addEventListener("submit", submitAudit);
+    }
+
+    async function submitAudit(event) {
+      event.preventDefault();
+      const form = event.target;
+      const body = {
+        store_name: form.store_name.value.trim(),
+        city: form.city.value.trim(),
+        pain: form.pain.value.trim(),
+      };
+      const btn = form.querySelector("button");
+      btn.disabled = true;
+      btn.textContent = "正在测…";
+      try {
+        const res = await fetch(`/public/artifacts/${encodeURIComponent(artifactId)}/audit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "测店失败");
+        localStorage.setItem("mealky_ref_artifact", artifactId);
+        host.innerHTML = `
+          <div class="kicker">免费诊断</div>
+          <h1>${escapeHtml(data.store_name)}，先看这三件</h1>
+          <div class="findings">${(data.findings || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("")}</div>
+          <p>${escapeHtml(data.next_step || "")}</p>
+          <a class="secondary" href="${escapeHtml(data.open_url || "/?ref=" + artifactId)}">开通 AI 店长</a>
+        `;
+      } catch (error) {
+        btn.disabled = false;
+        btn.textContent = "测一下我的店";
+        const err = document.createElement("p");
+        err.className = "err";
+        err.textContent = error.message;
+        form.appendChild(err);
+      }
+    }
+
+    fetch(`/public/artifacts/${encodeURIComponent(artifactId)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("结果卡不存在或已失效");
+        return res.json();
+      })
+      .then(renderCard)
+      .catch((error) => {
+        host.innerHTML = `<p class="err">${escapeHtml(error.message)}</p>`;
+      });
+  </script>
+</body>
+</html>

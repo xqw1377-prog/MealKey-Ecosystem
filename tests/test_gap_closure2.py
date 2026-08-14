@@ -267,9 +267,12 @@ def test_platform_mobile_reads_intake_submission() -> None:
     db = _session()
     seeded = seed_demo(db)
 
-    # 无 intake 数据时应 fallback 到 mock
-    snapshot = fetch_platform_snapshot("meituan", store_id=seeded["store_id"], mode="mobile")
-    assert snapshot is not None  # fallback 到 mock，不崩溃
+    # 无 intake 数据时应明确报错，不再 fallback 到 mock
+    try:
+        fetch_platform_snapshot("meituan", store_id=seeded["store_id"], mode="mobile")
+        raise AssertionError("mobile without intake data should fail explicitly")
+    except ValueError as exc:
+        assert "没有采集" in str(exc) or "手机连接" in str(exc)
 
     # 写入一条 intake 数据（用 IntakeSubmission 的真实字段）
     db.add(IntakeSubmission(
@@ -282,10 +285,12 @@ def test_platform_mobile_reads_intake_submission() -> None:
     ))
     db.commit()
 
-    snapshot2 = fetch_platform_snapshot("meituan", store_id=seeded["store_id"], mode="mobile")
+    snapshot2 = fetch_platform_snapshot("meituan", store_id=seeded["store_id"], mode="mobile", db=db)
     assert snapshot2 is not None
     # 从 intake 读到了门店名
     assert "手机采集" in snapshot2.store_name or snapshot2.store_name
+    assert snapshot2.synthetic is False
+    assert snapshot2.raw.get("source") == "mobile"
 
 
 # ---------------------------------------------------------------------------

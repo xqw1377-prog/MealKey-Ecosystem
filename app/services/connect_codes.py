@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -83,6 +84,7 @@ def create_connect_code(db: Session, store_id: str, platform: str) -> dict[str, 
     else:
         connection.status = "pending"
         connection.connector_mode = "mobile"
+        connection.last_error = None
         db.add(connection)
     db.commit()
     db.refresh(row)
@@ -113,9 +115,15 @@ def confirm_connect_code(db: Session, store_id: str, code: str, store) -> dict[s
         connection = PlatformConnection(store_id=store_id, platform=platform)
         db.add(connection)
     connection.status = "connected"
-    connection.connector_mode = connection.connector_mode or "mobile"
+    connection.connector_mode = "mobile"
     connection.connected_at = now
     connection.last_error = None
+    meta = _load_meta(connection.meta_json)
+    meta["mobile_connect"] = {
+        "code": row.code,
+        "confirmed_at": now.isoformat(),
+    }
+    connection.meta_json = json.dumps(meta, ensure_ascii=False)
     db.add(connection)
     db.add(row)
     db.commit()
@@ -123,10 +131,10 @@ def confirm_connect_code(db: Session, store_id: str, code: str, store) -> dict[s
     try:
         from app.services.platform_sync import sync_store_platform
 
-        mode = connection.connector_mode if connection.connector_mode in {"mock", "http"} else "mock"
-        sync_store_platform(db, store, platform, mode=mode)
+        sync_store_platform(db, store, platform, mode="mobile")
         connection.status = "connected"
         connection.last_sync_at = _utcnow()
+        connection.last_error = None
         db.add(connection)
         db.commit()
     except Exception as exc:  # noqa: BLE001
@@ -146,3 +154,13 @@ def confirm_connect_code(db: Session, store_id: str, code: str, store) -> dict[s
 
     db.refresh(row)
     return {"ok": True, "link": _to_payload(row)}
+
+
+def _load_meta(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}

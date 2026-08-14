@@ -11,12 +11,20 @@ function apiAuthHeaders(extra = {}) {
   return headers;
 }
 
+/**
+ * 刷新 access token。区分三种失败:
+ * - "no_api_token": 没有 api_token,需要登录
+ * - "network": 网络异常(fetch 抛错)
+ * - "server": 服务器拒绝(非 200)
+ * 返回 true 表示成功。
+ */
 async function ensureAccessToken() {
   if (window.localStorage.getItem("mealky_access_token")) return true;
   const apiToken = window.localStorage.getItem("mealky_api_token");
   if (!apiToken) return false;
+  let response;
   try {
-    const response = await fetch("/auth/token", {
+    response = await fetch("/auth/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -27,25 +35,68 @@ async function ensureAccessToken() {
         store_id: state.currentStoreId || undefined,
       }),
     });
-    if (!response.ok) return false;
-    const payload = await response.json();
-    if (payload.access_token) {
-      window.localStorage.setItem("mealky_access_token", payload.access_token);
-      return true;
-    }
-  } catch (_) {
-    /* ignore */
+  } catch (networkError) {
+    // 网络异常 — 不静默吞掉,记录到 state 供 UI 提示
+    state.lastAuthError = { type: "network", message: "网络异常，无法连接服务器", error: networkError };
+    return false;
   }
+  if (!response.ok) {
+    // 服务器拒绝 — token 可能已失效
+    state.lastAuthError = { type: "token_expired", message: "登录已过期，请重新获取访问令牌", status: response.status };
+    // 清掉可能过期的 token
+    if (response.status === 401 || response.status === 403) {
+      window.localStorage.removeItem("mealky_access_token");
+    }
+    return false;
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (payload.access_token) {
+    window.localStorage.setItem("mealky_access_token", payload.access_token);
+    state.lastAuthError = null;
+    return true;
+  }
+  state.lastAuthError = { type: "server", message: "服务器返回异常，未能获取访问令牌" };
   return false;
 }
 
 async function fetchJson(url, options = {}) {
-  const headers = apiAuthHeaders(
-    options.headers instanceof Headers
-      ? Object.fromEntries(options.headers.entries())
-      : options.headers || {},
-  );
-  const response = await fetch(url, { ...options, headers });
+  const { timeoutMs, headers, ...rest } = options || {};
+  const buildHeaders = (extra) =>
+    apiAuthHeaders(
+      extra instanceof Headers
+        ? Object.fromEntries(extra.entries())
+        : extra || {},
+    );
+
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = timeoutMs ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
+  const send = () =>
+    fetch(url, {
+      ...rest,
+      headers: buildHeaders(headers),
+      signal: controller ? controller.signal : rest.signal,
+    });
+
+  let response;
+  try {
+    response = await send();
+    if (response.status === 401) {
+      const refreshed = await ensureAccessToken();
+      if (refreshed) {
+        response = await send();
+      }
+    }
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("加载超时，店长工作台已改走规则引擎，请刷新重试");
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
+
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const detail = payload.detail;
@@ -114,12 +165,57 @@ async function transcribeAudioFiles(fileList) {
 async function fetchDashboardBundle(storeId, { refresh = false } = {}) {
   return fetchJson(
     refresh ? `/workspace/stores/${storeId}/refresh` : `/workspace/stores/${storeId}/dashboard`,
-    refresh ? { method: "POST" } : undefined,
+    refresh ? { method: "POST", timeoutMs: 12000 } : { timeoutMs: 12000 },
   );
 }
 
 async function fetchRuntimeWorkspace(storeId) {
-  return fetchJson(`/v1/stores/${storeId}/workspace`).catch(() => null);
+  try {
+    return await fetchJson(`/v1/stores/${storeId}/workspace`, { timeoutMs: 12000 });
+  } catch (error) {
+    if (typeof notifyError === "function") {
+      notifyError(error.message || "经营工作台加载失败");
+    }
+    return null;
+  }
+}
+
+async function markLoopExecuted(storeId, loopId) {
+  return fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/loop/${encodeURIComponent(loopId)}/executed`, {
+    method: "POST",
+  });
+}
+
+async function attachLoopEvidence(storeId, loopId, payload) {
+  return fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/loop/${encodeURIComponent(loopId)}/evidence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+async function executeLoopPlatform(storeId, loopId) {
+  return fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/loop/${encodeURIComponent(loopId)}/execute-platform`, {
+    method: "POST",
+  });
+}
+
+async function markLoopNotExecuted(storeId, loopId) {
+  return fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/loop/${encodeURIComponent(loopId)}/not-executed`, {
+    method: "POST",
+  });
+}
+
+async function markLoopAcked(storeId, loopId) {
+  return fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/loop/${encodeURIComponent(loopId)}/ack`, {
+    method: "POST",
+  });
+}
+
+async function shareLoopResultCard(storeId, loopId) {
+  return fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/loop/${encodeURIComponent(loopId)}/share-card`, {
+    method: "POST",
+  });
 }
 
 async function fetchRuntimeDailyPlan(storeId) {
@@ -134,9 +230,10 @@ function mergeRuntimeIntoBrief() {
   const mb = state.managerBrief;
   if (!mb.ops_queue) mb.ops_queue = {};
   const oq = mb.ops_queue;
-  if (rw.left.need_you?.length) oq.need_you = rw.left.need_you;
-  if (rw.left.active?.length) oq.working = rw.left.active;
-  if (rw.left.completed?.length) oq.results = rw.left.completed;
+  if (Array.isArray(rw.left.need_you)) oq.need_you = rw.left.need_you;
+  if (Array.isArray(rw.left.active)) oq.working = rw.left.active;
+  if (Array.isArray(rw.left.completed)) oq.results = rw.left.completed;
+  if (Array.isArray(rw.left.waiting)) oq.waiting = rw.left.waiting;
   if (rw.left.opportunities?.length) oq.opportunities = rw.left.opportunities;
   if (rw.left.active_goal) oq.active_goal = rw.left.active_goal;
   if (rw.left.threads?.length) oq.threads = rw.left.threads;
@@ -176,30 +273,36 @@ async function pollStoreNotifications(storeId) {
 
 async function loadHomeWorkspace(storeId) {
   state.currentStoreId = storeId;
-  const [runtimeWorkspace, settingsOverview, understanding, platformLinks] = await Promise.all([
+  persistStoreId(storeId);
+  const [runtimeWorkspace, settingsOverview, understanding, platformLinks, commercialBoard] = await Promise.all([
     fetchRuntimeWorkspace(storeId),
     fetchJson(`/settings/overview?store_id=${encodeURIComponent(storeId)}`).catch(
       () => null,
     ),
     fetchJson(`/stores/${storeId}/understanding`).catch(() => null),
     fetchJson(`/workspace/stores/${storeId}/platform-links`).catch(() => ({ links: [] })),
+    fetchJson(`/v1/stores/${encodeURIComponent(storeId)}/commercial/board`).catch(() => null),
   ]);
   state.runtimeWorkspace = runtimeWorkspace;
   state.settingsOverview = settingsOverview;
   state.ownerProfile = settingsOverview?.owner || state.ownerProfile;
   state.understanding = understanding;
   state.platformLinks = platformLinks?.links || [];
-  if (!state.dashboard) {
-    state.dashboard = {
-      store: settingsOverview?.store || { id: storeId, name: "门店" },
-      experiments: [],
-      question_examples: [],
-    };
-  }
+  if (commercialBoard) state.commercialBoard = commercialBoard;
+  state.dashboard = {
+    ...(state.dashboard || {}),
+    store:
+      settingsOverview?.store ||
+      state.dashboard?.store ||
+      { id: storeId, name: "门店" },
+    experiments: state.dashboard?.experiments || [],
+    question_examples: state.dashboard?.question_examples || [],
+  };
   await pollStoreNotifications(storeId);
   renderHomeShell();
   applyOwnerProfileUI(state.ownerProfile || settingsOverview?.owner);
   loadOwnerProfile(storeId).catch(() => null);
+  if (typeof renderDataCoveragePanel === "function") renderDataCoveragePanel();
 }
 
 async function ensureFullDashboard() {
@@ -228,7 +331,7 @@ function loadAmapSdk(config) {
 async function fetchSensingBundle(storeId) {
   const [managerBrief, operatingEvents, strategyMemory, understanding, dailyPlan, actionTraces] =
     await Promise.all([
-      fetchJson(`/stores/${storeId}/manager_brief`).catch(() => null),
+      fetchJson(`/stores/${storeId}/manager_brief`, { timeoutMs: 12000 }).catch(() => null),
       fetchJson(`/stores/${storeId}/events`).catch(() => null),
       fetchJson(`/stores/${storeId}/strategy_memory`).catch(() => null),
       fetchJson(`/stores/${storeId}/understanding`).catch(() => null),
@@ -246,9 +349,15 @@ async function fetchSensingBundle(storeId) {
 
 async function loadStores() {
   const payload = await fetchJson("/workspace/stores");
-  state.stores = payload.stores || [];
-  if (!state.currentStoreId && state.stores.length) {
-    state.currentStoreId = state.stores[0].id;
+  const preferredId = state.currentStoreId || persistedStoreId();
+  state.stores = dedupeStores(payload.stores || [], preferredId);
+  const hasCurrent = state.stores.some((store) => store.id === state.currentStoreId);
+  if ((!state.currentStoreId || !hasCurrent) && state.stores.length) {
+    const preferred = state.stores.find((store) => store.id === preferredId);
+    state.currentStoreId = preferred?.id || state.stores[0].id;
+  }
+  if (state.currentStoreId) {
+    persistStoreId(state.currentStoreId);
   }
   renderStoreSelector();
 }
@@ -258,6 +367,7 @@ async function bootstrapWorkspace() {
   await loadStores();
   if (payload.default_store_id) {
     state.currentStoreId = payload.default_store_id;
+    persistStoreId(payload.default_store_id);
   }
   if (state.currentStoreId) {
     await loadDashboard(state.currentStoreId);
@@ -267,16 +377,45 @@ async function bootstrapWorkspace() {
 function openIntakeModal() {
   const modal = qs("#intakeModal");
   if (!modal) return;
+  resetIntakeForm();
+  modal.hidden = false;
+  modal.inert = false;
   modal.setAttribute("aria-hidden", "false");
   modal.classList.add("open");
   qs("#intakeStoreName")?.focus();
 }
 
-function closeIntakeModal() {
+function resetIntakeForm() {
+  const form = qs("#intakeForm");
+  if (form) form.reset();
+  const hint = qs("#intakePreviewHint");
+  if (hint) {
+    if (!hint.dataset.defaultText) {
+      hint.dataset.defaultText = hint.textContent || "填完后可先预览完备度，再提交建店。";
+    }
+    hint.textContent = hint.dataset.defaultText;
+  }
+  const submitBtn = qs("#intakeSubmitBtn");
+  if (submitBtn) {
+    if (!submitBtn.dataset.defaultLabel) {
+      submitBtn.dataset.defaultLabel = submitBtn.textContent || "提交建店";
+    }
+    submitBtn.disabled = false;
+    submitBtn.textContent = submitBtn.dataset.defaultLabel;
+  }
+}
+
+function closeIntakeModal({ reset = false } = {}) {
   const modal = qs("#intakeModal");
   if (!modal) return;
   modal.setAttribute("aria-hidden", "true");
   modal.classList.remove("open");
+  modal.inert = true;
+  modal.hidden = true;
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  if (reset) resetIntakeForm();
 }
 
 function intakeFormPayload() {
@@ -321,6 +460,8 @@ async function submitIntakeForm(event) {
     notifyError("请先填写门店名称");
     return;
   }
+  const ref = window.localStorage.getItem("mealky_ref_artifact");
+  if (ref) payload.referral_artifact_id = ref;
   const btn = qs("#intakeSubmitBtn");
   const original = btn?.textContent;
   if (btn) {
@@ -333,13 +474,21 @@ async function submitIntakeForm(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    closeIntakeModal();
+    const nextStoreId = String(result.store_id || "").trim();
+    closeIntakeModal({ reset: true });
     await loadStores();
-    if (result.store_id) {
-      state.currentStoreId = result.store_id;
+    if (nextStoreId) {
+      state.currentStoreId = nextStoreId;
+      persistStoreId(nextStoreId);
+      state.activeWorkspace = "section-overview";
+      state.focusOverrideCard = null;
+      state.pendingWorkThreadId = null;
       state._fullDashboardLoaded = false;
-      await loadDashboard(result.store_id);
+      renderStoreSelector();
+      await loadDashboard(nextStoreId);
+      closeIntakeModal({ reset: true });
     }
+    if (ref) window.localStorage.removeItem("mealky_ref_artifact");
     notifySuccess("门店已接入，MealKey 开始接手");
   } catch (error) {
     notifyError(error.message || "建店失败");
@@ -353,6 +502,7 @@ async function submitIntakeForm(event) {
 
 async function loadDashboard(storeId, { forceFull = false } = {}) {
   state.currentStoreId = storeId;
+  persistStoreId(storeId);
   const stayHome =
     !forceFull &&
     isHomeWorkspace(state.activeWorkspace || "section-overview");
@@ -361,12 +511,17 @@ async function loadDashboard(storeId, { forceFull = false } = {}) {
     await loadHomeWorkspace(storeId);
     return;
   }
-  const [dashboard, competitionMap, collectionRuns, platformLinks, settingsOverview, runtimeWorkspace] =
+  const [dashboard, competitionMap, collectionRuns, platformIntel, platformLinks, settingsOverview, runtimeWorkspace] =
     await Promise.all([
       fetchDashboardBundle(storeId),
       fetchJson(`/stores/${storeId}/competition/map`).catch(() => null),
       fetchJson(`/stores/${storeId}/competition/collection-runs`).catch(() => ({
         runs: [],
+      })),
+      fetchJson("/v1/platform-intel?limit=20").catch(() => ({
+        items: [],
+        last_run: null,
+        sources: [],
       })),
       fetchJson(`/workspace/stores/${storeId}/platform-links`).catch(() => ({
         links: [],
@@ -380,6 +535,7 @@ async function loadDashboard(storeId, { forceFull = false } = {}) {
   state.runtimeWorkspace = runtimeWorkspace;
   state.competitionMap = competitionMap;
   state.collectionRuns = collectionRuns.runs || [];
+  state.platformIntel = platformIntel || { items: [], last_run: null, sources: [] };
   state.platformLinks = platformLinks.links || [];
   state.settingsOverview = settingsOverview;
   state.ownerProfile = settingsOverview?.owner || state.ownerProfile;
@@ -403,13 +559,18 @@ async function refreshDashboard() {
       await loadHomeWorkspace(state.currentStoreId);
       return;
     }
-    const [dashboard, competitionMap, collectionRuns, platformLinks, settingsOverview, runtimeWorkspace] =
+    const [dashboard, competitionMap, collectionRuns, platformIntel, platformLinks, settingsOverview, runtimeWorkspace] =
       await Promise.all([
         fetchDashboardBundle(state.currentStoreId, { refresh: true }),
         fetchJson(`/stores/${state.currentStoreId}/competition/map`).catch(() => null),
         fetchJson(`/stores/${state.currentStoreId}/competition/collection-runs`).catch(
           () => ({ runs: [] }),
         ),
+        fetchJson("/v1/platform-intel?limit=20").catch(() => ({
+          items: [],
+          last_run: null,
+          sources: [],
+        })),
         fetchJson(`/workspace/stores/${state.currentStoreId}/platform-links`).catch(
           () => ({ links: [] }),
         ),
@@ -422,6 +583,7 @@ async function refreshDashboard() {
     state.runtimeWorkspace = runtimeWorkspace;
     state.competitionMap = competitionMap;
     state.collectionRuns = collectionRuns.runs || [];
+    state.platformIntel = platformIntel || { items: [], last_run: null, sources: [] };
     state.platformLinks = platformLinks.links || [];
     state.settingsOverview = settingsOverview;
     state.ownerProfile = settingsOverview?.owner || state.ownerProfile;
@@ -479,4 +641,145 @@ async function loadAssist(topic) {
   const guide = await fetchJson(path);
   showAssistGuide(guide);
   scrollToSection("section-settings");
+}
+
+/* ── 成本管理 (Track B: Business Truth) ── */
+
+async function uploadCostSheet(file) {
+  if (!state.currentStoreId) {
+    notifyError("请先选择门店");
+    return null;
+  }
+  const form = new FormData();
+  form.set("file", file, file.name);
+  try {
+    const response = await fetch(
+      `/stores/${encodeURIComponent(state.currentStoreId)}/cost/import`,
+      {
+        method: "POST",
+        headers: apiAuthHeaders(),
+        body: form,
+      },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || `上传失败：${response.status}`);
+    }
+    const report = await response.json();
+    const matched = report.matched || 0;
+    const total = report.total_rows || 0;
+    const unmatched = report.unmatched || 0;
+    if (report.error) {
+      notifyError(report.error);
+    } else if (unmatched > 0) {
+      notifyInfo(
+        `成本表已导入：${matched}/${total} 个商品匹配成功，${unmatched} 个未匹配（需人工确认）。利润计算已切换为真实模式。`,
+      );
+    } else {
+      notifySuccess(`成本表导入成功：${matched} 个商品成本已更新，利润计算更准了。`);
+    }
+    // 刷新首页,让利润数据从 proxy 切换到 observed
+    if (state.currentStoreId) {
+      loadHomeWorkspace(state.currentStoreId).catch(() => null);
+    }
+    return report;
+  } catch (error) {
+    notifyError(error.message || "成本表导入失败");
+    return null;
+  }
+}
+
+async function fetchCostCoverage() {
+  if (!state.currentStoreId) return null;
+  try {
+    return await fetchJson(
+      `/stores/${encodeURIComponent(state.currentStoreId)}/cost/coverage`,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchCostItems() {
+  if (!state.currentStoreId) return null;
+  try {
+    return await fetchJson(
+      `/stores/${encodeURIComponent(state.currentStoreId)}/cost/items`,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+/* ── 经营数据导入 (补足平台真实数据短板) ── */
+
+const IMPORT_TYPES = {
+  funnel: { label: "经营数据", endpoint: "/import/funnel" },
+  ads: { label: "推广投流", endpoint: "/import/ads" },
+  reviews: { label: "评价数据", endpoint: "/import/reviews" },
+  campaigns: { label: "活动数据", endpoint: "/import/campaigns" },
+  orders: { label: "订单明细", endpoint: "/import/orders" },
+  ops: { label: "运营指标", endpoint: "/import/ops" },
+};
+
+async function uploadBusinessData(file, importType) {
+  if (!state.currentStoreId) { notifyError("请先选择门店"); return null; }
+  const config = IMPORT_TYPES[importType];
+  if (!config) { notifyError("未知的导入类型"); return null; }
+  const form = new FormData();
+  form.set("file", file, file.name);
+  try {
+    const response = await fetch(
+      `/stores/${encodeURIComponent(state.currentStoreId)}${config.endpoint}`,
+      { method: "POST", headers: apiAuthHeaders(), body: form },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || `上传失败：${response.status}`);
+    }
+    const report = await response.json();
+    if (report.error) { notifyError(report.error); }
+    else { notifySuccess(report.message || `${config.label}导入成功`); }
+    if (state.currentStoreId) { loadHomeWorkspace(state.currentStoreId).catch(() => null); }
+    return report;
+  } catch (error) {
+    notifyError(error.message || "数据导入失败");
+    return null;
+  }
+}
+
+async function fetchDataCoverage() {
+  if (!state.currentStoreId) return null;
+  try {
+    return await fetchJson(`/stores/${encodeURIComponent(state.currentStoreId)}/import/coverage`);
+  } catch (_) { return null; }
+}
+
+async function fetchSeedLaunch() {
+  if (!state.currentStoreId) return null;
+  try {
+    const seed = await fetchJson(`/stores/${encodeURIComponent(state.currentStoreId)}/seed-launch`);
+    state.seedLaunch = seed;
+    return seed;
+  } catch (_) {
+    state.seedLaunch = null;
+    return null;
+  }
+}
+
+function startSeedImport(key) {
+  const step = (state.seedLaunch?.onboarding?.steps || []).find((item) => item.key === key);
+  if (step?.how) notifyInfo(step.how);
+  if (key === "cost") {
+    qs("#commandBarCostInput")?.click();
+    return;
+  }
+  const typeMap = { orders: "orders", funnel: "funnel", reviews: "reviews", ads: "ads" };
+  const importType = typeMap[key];
+  if (!importType) {
+    notifyInfo("这份请点「导入经营数据」按提示上传。");
+    return;
+  }
+  state.pendingImportType = importType;
+  qs("#commandBarImportInput")?.click();
 }

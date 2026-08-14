@@ -146,6 +146,7 @@ SAFE_MODE_BLOCKED_ACTIONS = {
 
 SAFE_MODE_ALLOWED_ACTIONS = {
     "batch_reply_negative_reviews",
+    "reply_ordinary_reviews",
     "publish_service_reply_scripts",
     "fix_top_review_theme",
     "pin_positive_review_themes",

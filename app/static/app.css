@@ -1335,10 +1335,20 @@ body.view-home.right-rail-open .content-grid {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   margin-bottom: 8px;
   padding: 8px;
+  border: 0;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.65);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-owner:hover {
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .goal-home {
@@ -5331,6 +5341,26 @@ body.view-home .workspace-deck,
   background: linear-gradient(180deg, #fbfcf9 0%, #f5f7f2 100%);
 }
 
+.platform-intel-panel {
+  margin-top: 14px;
+}
+
+.intel-kind {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.intel-kind.promo { background: #fff3e0; color: #b45309; }
+.intel-kind.policy { background: #e8f1ff; color: #1d4ed8; }
+.intel-kind.news { background: #eef2ea; color: #3f4a3a; }
+
 .collection-run-list,
 .collection-change-list {
   display: grid;
@@ -7793,3 +7823,109 @@ body.view-home .workspace-deck,
     grid-template-columns: 1fr;
   }
 }
+
+/* ── 数据覆盖度面板 ── */
+.mk-data-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 0 2px;
+  min-height: 0;
+}
+.mk-data-coverage:empty { display: none; }
+.mk-seed-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.coverage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.coverage-chip.ok { background: var(--mk-green-soft, #e8f2ec); color: var(--mk-green, #2f6b4f); }
+.coverage-chip.warn { background: #fff4e0; color: #c08a2e; }
+.coverage-chip.missing { background: var(--mk-red-soft, #f8ebe8); color: var(--mk-red, #c45c4a); }
+.coverage-chip.is-action {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.mk-seed-coach,
+.mk-seed-how,
+.mk-seed-sla {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mk-muted, #6b645c);
+}
+.mk-seed-coach,
+.mk-seed-sla strong,
+.mk-seed-how strong {
+  color: var(--mk-ink, #1f1b16);
+  font-weight: 650;
+}
+.mk-seed-sla-item,
+.mk-seed-bill {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mk-ink, #1f1b16);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.mk-seed-bill {
+  display: block;
+  text-align: left;
+  line-height: 1.5;
+}
+
+/* ── 推荐预览/回滚按钮 ── */
+.rec-preview-btn, .rec-rollback-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.rec-preview-btn { color: var(--mk-blue, #3d6f9c); }
+.rec-rollback-btn { color: var(--mk-red, #c45c4a); }
+.rec-preview-btn:hover, .rec-rollback-btn:hover { opacity: 1; background: rgba(0,0,0,0.04); }
+
+/* ── 投流摘要面板 ── */
+.mk-ads-summary {
+  padding: 8px 12px;
+  margin: 4px 0;
+  background: var(--mk-card, #fff);
+  border: 1px solid var(--mk-line, rgba(0,0,0,0.07));
+  border-radius: 10px;
+}
+.ads-summary-head { font-size: 12px; font-weight: 600; color: var(--mk-muted, #888); margin-bottom: 6px; }
+.ads-metrics-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+.ads-metric { display: flex; flex-direction: column; gap: 2px; }
+.ads-metric strong { font-size: 16px; font-weight: 700; color: var(--mk-ink, #1a1a1a); }
+.ads-metric span { font-size: 11px; color: var(--mk-muted, #888); }
+.trend-bad { color: var(--mk-red, #c45c4a); font-size: 11px; font-weight: 600; }
+.trend-good { color: var(--mk-green, #2f6b4f); font-size: 11px; font-weight: 600; }
+.trend-neutral { color: var(--mk-muted, #888); font-size: 11px; }
+.ads-finding { font-size: 11px; color: var(--mk-muted, #888); margin-top: 6px; padding: 4px 8px; background: var(--mk-bubble, #f0ebe3); border-radius: 6px; }
+
+/* ── 成本列表表格 ── */
+.mk-cost-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.mk-cost-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--mk-line); color: var(--mk-muted); font-weight: 500; }
+.mk-cost-table td { padding: 6px 8px; border-bottom: 1px solid var(--mk-line); }
+.mk-cost-table .has-cost { color: var(--mk-green); }
+.mk-cost-table .no-cost { color: var(--mk-red); }
+.mk-cost-edit-input { width: 60px; font-size: 12px; border: 1px solid var(--mk-line); border-radius: 4px; padding: 2px 4px; }

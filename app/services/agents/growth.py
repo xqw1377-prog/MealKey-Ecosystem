@@ -75,6 +75,7 @@ def _growth_action_bias(action_type: str | None) -> tuple[int, int]:
         "refresh_signature_card",
         "fix_top_review_theme",
         "batch_reply_negative_reviews",
+        "reply_ordinary_reviews",
     }:
         return (0, 0)
     if action_type in {
@@ -231,6 +232,7 @@ def _recommendation_source(action_type: str) -> str:
         return "crm"
     if action_type in {
         "batch_reply_negative_reviews",
+        "reply_ordinary_reviews",
         "publish_service_reply_scripts",
         "escalate_portion_complaints",
     }:
@@ -339,6 +341,7 @@ def _growth_opportunity_pool(
         "store_discount": 2.0,
         "fix_top_review_theme": 4.0,
         "batch_reply_negative_reviews": 4.8,
+        "reply_ordinary_reviews": 5.0,
         "pin_positive_review_themes": 4.5,
         "reply_rating_critical_reviews": 4.6,
         "recall_churn_risk_users": 3.5,
@@ -371,6 +374,7 @@ def _growth_opportunity_pool(
         "store_discount": 4.0,
         "fix_top_review_theme": 1.5,
         "batch_reply_negative_reviews": 1.0,
+        "reply_ordinary_reviews": 0.8,
         "pin_positive_review_themes": 1.1,
         "reply_rating_critical_reviews": 1.1,
         "recall_churn_risk_users": 2.0,
@@ -581,7 +585,9 @@ def _growth_opportunity_pool(
     unique: dict[tuple[str, str], GrowthOpportunityView] = {}
     for opportunity in sorted(pool, key=lambda row: row.score, reverse=True):
         unique.setdefault((opportunity.action_type, opportunity.object_name), opportunity)
-    return list(unique.values())[:8]
+    from app.services.action_ranker import apply_memory_to_growth_pool
+
+    return apply_memory_to_growth_pool(list(unique.values())[:8], strategy_memory)
 
 def _growth_today_priority(
     current_action: AgentWorkflowItem | None,
@@ -768,7 +774,7 @@ def _build_growth_agent(
     )
     ranked_executable_opportunities = sorted(
         [row for row in opportunity_pool if row.executable],
-        key=lambda row: (_growth_action_bias(row.action_type), -(row.score or 0.0)),
+        key=lambda row: (-(row.score or 0.0), _growth_action_bias(row.action_type)),
     )
     locked_current_opportunity = next(
         (

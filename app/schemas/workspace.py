@@ -51,6 +51,7 @@ class IntakePreviewRequest(BaseModel):
 
 class IntakeSubmitRequest(IntakePreviewRequest):
     business_hours: Optional[str] = None
+    referral_artifact_id: Optional[str] = Field(default=None, max_length=36)
 
 
 class DocumentSyncRequest(BaseModel):
@@ -61,3 +62,4 @@ class DocumentSyncRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
     days: int = Field(default=7, ge=1, le=30)
+    work_thread_id: Optional[str] = Field(default=None, max_length=64)

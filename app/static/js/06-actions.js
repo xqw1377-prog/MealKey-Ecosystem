@@ -360,13 +360,19 @@ function fillOwnerProfileForm(profile) {
   }
 }
 
-function openOwnerProfileModal() {
+function openOwnerProfileModal(options = {}) {
   const modal = qs("#ownerProfileModal");
   if (!modal) return;
+  const focus = options.focus || "";
   fillOwnerProfileForm(state.ownerProfile || state.settingsOverview?.owner || {});
   modal.classList.add("open");
   modal.setAttribute("aria-hidden", "false");
-  qs("#ownerDisplayNameInput")?.focus();
+  if (focus !== "wallet") qs("#ownerDisplayNameInput")?.focus();
+  loadOwnerBillBoard().then(() => {
+    if (focus === "wallet") {
+      qs("#ownerBillWallet")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
 }
 
 function closeOwnerProfileModal() {
@@ -448,6 +454,373 @@ async function saveOwnerProfile(event) {
       saveBtn.disabled = false;
       saveBtn.textContent = original;
     }
+  }
+}
+
+function formatBillYuan(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "¥--";
+  return `¥${amount.toLocaleString("zh-CN", { minimumFractionDigits: amount % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+}
+
+function cycleBillCopy(cycle) {
+  if (cycle === "annual") return { title: "年付", hint: "付 10 个月，用 12 个月" };
+  if (cycle === "quarterly") return { title: "季付", hint: "付 2.75 个月，用 3 个月" };
+  return { title: "月付", hint: "按月原价" };
+}
+
+function renderOwnerBillBoard(board) {
+  state.commercialBoard = board || null;
+  const cycles = qs("#ownerBillCycles");
+  const hint = qs("#ownerBillStoreHint");
+  const note = qs("#ownerBillNote");
+  const lead = qs("#ownerBillLead");
+  const balance = qs("#ownerWalletBalance");
+  const used = qs("#ownerWalletUsed");
+  const topups = qs("#ownerWalletTopups");
+  const transfer = qs("#ownerBillTransfer");
+  if (!cycles) return;
+  if (!board) {
+    cycles.innerHTML = `<p class="profile-bill-empty">账单暂时无法加载</p>`;
+    return;
+  }
+  const stores = Number(board.active_stores || 1);
+  if (hint) hint.textContent = `${stores} 家活跃门店计价`;
+  const currentCycle = board.current?.billing_cycle || "monthly";
+  const quotes = board.quotes || {};
+  const billing = board.billing || {};
+  const transferOnly = billing.mode === "bank_transfer";
+  if (lead) {
+    lead.textContent = transferOnly
+      ? "月费 ¥300。对公转账后运营手工开通，不在这里一键扣费。"
+      : "门店越多越优惠，买得越久越优惠。没有券，也没有套餐迷宫。";
+  }
+  cycles.innerHTML = ["monthly", "quarterly", "annual"]
+    .map((cycle) => {
+      const quote = quotes[cycle] || {};
+      const copy = cycleBillCopy(cycle);
+      const current = cycle === currentCycle;
+      if (transferOnly) {
+        return `<div class="profile-cycle-card is-quote${current ? " is-current" : ""}">
+        <span class="profile-cycle-title">${copy.title}${current ? " · 当前" : ""}</span>
+        <strong>${formatBillYuan(quote.equiv_monthly_cny)}<em>/月</em></strong>
+        <span>${copy.hint}</span>
+        <span>本期 ${formatBillYuan(quote.billed_cny)} · 转账开通</span>
+      </div>`;
+      }
+      return `<button type="button" class="profile-cycle-card${current ? " is-current" : ""}" data-bill-cycle="${cycle}">
+        <span class="profile-cycle-title">${copy.title}${current ? " · 当前" : ""}</span>
+        <strong>${formatBillYuan(quote.equiv_monthly_cny)}<em>/月</em></strong>
+        <span>${copy.hint}</span>
+        <span>本期 ${formatBillYuan(quote.billed_cny)}</span>
+      </button>`;
+    })
+    .join("");
+  if (balance) balance.textContent = formatBillYuan(board.wallet?.balance_cny);
+  if (used) used.textContent = formatBillYuan(board.wallet?.month_used_cny);
+  const alert = board.wallet?.alert;
+  if (transfer) {
+    if (transferOnly) {
+      transfer.hidden = false;
+      const account = billing.where
+        ? `<p>账户：${escapeHtml(billing.where)}</p>`
+        : "";
+      const hintLine = billing.note_hint
+        ? `<p>${escapeHtml(billing.note_hint)}</p>`
+        : "";
+      transfer.innerHTML = `<strong>对公转账开通</strong>${account}${hintLine}<p>${escapeHtml(billing.instructions_text || board.demo_note || "对公转账后把凭证发给运营。")}</p>`;
+    } else {
+      transfer.hidden = true;
+      transfer.innerHTML = "";
+    }
+  }
+  if (note && transferOnly) {
+    note.textContent = "种子客户不走微信自动扣费。";
+  } else if (note && alert && alert.status && alert.status !== "ok") {
+    note.textContent = alert.message || "AI 算力余额不足";
+  } else if (note) {
+    note.textContent = board.demo_note || "演示环境直接入账，不走真实支付。";
+  }
+  const tiers = board.wallet?.topup_tiers_cny || [200, 500, 1000];
+  if (topups) {
+    if (transferOnly) {
+      topups.innerHTML = `<p class="profile-bill-empty">算力储值也走对公转账，运营核对后手工入账。</p>`;
+    } else {
+      topups.innerHTML = tiers
+        .map(
+          (amount) =>
+            `<button type="button" class="topbar-button" data-wallet-topup="${amount}">充 ${formatBillYuan(amount)}</button>`,
+        )
+        .join("");
+    }
+  }
+  if (typeof renderWalletBanner === "function") renderWalletBanner();
+}
+
+async function loadOwnerBillBoard() {
+  const cycles = qs("#ownerBillCycles");
+  if (!state.currentStoreId) {
+    if (cycles) cycles.innerHTML = `<p class="profile-bill-empty">请先选择门店</p>`;
+    return;
+  }
+  if (cycles && !state.commercialBoard) {
+    cycles.innerHTML = `<p class="profile-bill-empty">账单加载中…</p>`;
+  }
+  try {
+    const board = await fetchJson(`/v1/stores/${encodeURIComponent(state.currentStoreId)}/commercial/board`);
+    renderOwnerBillBoard(board);
+  } catch (error) {
+    if (cycles) cycles.innerHTML = `<p class="profile-bill-empty">账单加载失败：${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function subscribeOwnerBillCycle(cycle) {
+  if (!state.currentStoreId) {
+    notifyError("请先选择门店");
+    return;
+  }
+  const billing = state.commercialBoard?.billing || {};
+  if (billing.mode === "bank_transfer") {
+    notifyInfo(billing.instructions_text || "请对公转账后联系运营手工开通，不要在这里直接入账。");
+    return;
+  }
+  const current = state.commercialBoard?.current?.billing_cycle;
+  if (current === cycle) {
+    notifyInfo("已是当前周期");
+    return;
+  }
+  try {
+    const board = await fetchJson(`/v1/stores/${encodeURIComponent(state.currentStoreId)}/commercial/subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ billing_cycle: cycle }),
+    });
+    renderOwnerBillBoard(board);
+    const copy = cycleBillCopy(cycle);
+    notifySuccess(`已开通${copy.title}经营服务费`);
+  } catch (error) {
+    notifyError(`开通失败：${error.message}`);
+  }
+}
+
+async function topupOwnerWallet(amount) {
+  if (!state.currentStoreId) {
+    notifyError("请先选择门店");
+    return;
+  }
+  const billing = state.commercialBoard?.billing || {};
+  if (billing.mode === "bank_transfer") {
+    notifyInfo(billing.instructions_text || "请对公转账后联系运营手工入账算力钱包。");
+    return;
+  }
+  try {
+    const board = await fetchJson(`/v1/stores/${encodeURIComponent(state.currentStoreId)}/commercial/wallet/topup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount_cny: Number(amount) }),
+    });
+    renderOwnerBillBoard(board);
+    notifySuccess(`已充值 ${formatBillYuan(amount)}`);
+    if (typeof renderWalletBanner === "function") renderWalletBanner();
+  } catch (error) {
+    notifyError(`储值失败：${error.message}`);
+  }
+}
+
+function renderWalletBanner() {
+  const banner = qs("#mkWalletBanner");
+  if (!banner) return;
+  const interviewing = document.body.classList.contains("interviewing");
+  const alert = state.commercialBoard?.wallet?.alert;
+  const billing = state.commercialBoard?.billing || {};
+  const unpaid =
+    billing.mode === "bank_transfer" &&
+    String(state.commercialBoard?.current?.status || "trial") !== "paid";
+  if (interviewing) {
+    banner.hidden = true;
+    banner.style.display = "none";
+    return;
+  }
+  if (alert?.show_home_banner) {
+    banner.hidden = false;
+    banner.style.display = "";
+    banner.setAttribute("aria-label", alert.title || "AI 算力余额不足");
+    banner.innerHTML = `
+    <span class="mk-safe-mode-copy">
+      <strong>${escapeHtml(alert.title || "AI 算力余额不足")}</strong>
+      <span>${escapeHtml(alert.message || "充值后店长才能继续深度分析")}</span>
+    </span>
+    <span class="mk-safe-mode-cta">${escapeHtml(alert.cta || "去充值")} <i aria-hidden="true">›</i></span>`;
+    return;
+  }
+  if (unpaid) {
+    banner.hidden = false;
+    banner.style.display = "";
+    banner.setAttribute("aria-label", "对公转账开通");
+    banner.innerHTML = `
+    <span class="mk-safe-mode-copy">
+      <strong>月费 ¥300，对公转账开通</strong>
+      <span>${escapeHtml(billing.instructions_text || "转账后把凭证发给运营，不走微信自动扣费。")}</span>
+    </span>
+    <span class="mk-safe-mode-cta">看转账说明 <i aria-hidden="true">›</i></span>`;
+    return;
+  }
+  banner.hidden = true;
+  banner.style.display = "none";
+}
+
+function looksLikePromoPosterPrompt(text) {
+  const raw = String(text || "");
+  if (!raw) return false;
+  if (raw.includes("主图") || raw.includes("头图")) return false;
+  return ["海报", "促销海报", "活动海报", "宣传图", "朋友圈图"].some((token) => raw.includes(token));
+}
+
+function renderPromoPosterBody(pack) {
+  const poster = pack?.poster || {};
+  const colors = poster.colors || {};
+  const alert = pack?.wallet_alert || pack?.wallet?.alert;
+  const themes = [
+    ["lunch", "午市"],
+    ["new", "新品"],
+    ["festival", "节日"],
+    ["weekend", "周末"],
+    ["value", "超值"],
+  ];
+  const walletHtml =
+    alert && alert.status && alert.status !== "ok"
+      ? `<button type="button" class="mk-poster-wallet" data-open-wallet>
+          <strong>${escapeHtml(alert.title || "AI 算力余额不足")}</strong>
+          <span>${escapeHtml(alert.message || "充值后可继续用店长精修")}</span>
+          <em>${escapeHtml(alert.cta || "去充值")}</em>
+        </button>`
+      : "";
+  return `
+    ${walletHtml}
+    <div class="mk-poster-themes">
+      ${themes
+        .map(
+          ([key, label]) =>
+            `<button type="button" class="mk-poster-theme${poster.theme === key ? " is-on" : ""}" data-poster-theme="${key}">${label}</button>`,
+        )
+        .join("")}
+    </div>
+    <article class="mk-poster-card" id="mkPosterCard" style="--poster-bg:${escapeHtml(colors.bg || "#C23A2B")};--poster-accent:${escapeHtml(colors.accent || "#F4C430")};--poster-ink:${escapeHtml(colors.ink || "#FFF8EE")}">
+      <span class="mk-poster-kicker">${escapeHtml(poster.kicker || "促销")}</span>
+      <strong class="mk-poster-store">${escapeHtml(poster.store_name || "门店")}</strong>
+      <h4 class="mk-poster-headline">${escapeHtml(poster.headline || "")}</h4>
+      <p class="mk-poster-dish">${escapeHtml(poster.dish || "")}</p>
+      <p class="mk-poster-offer">${escapeHtml(poster.offer || "")}</p>
+      <p class="mk-poster-sub">${escapeHtml(poster.subhead || "")}</p>
+      <span class="mk-poster-period">${escapeHtml(poster.period || "")}</span>
+      <small>${escapeHtml(poster.footnote || "")}</small>
+    </article>
+    <p class="mk-poster-copy">${escapeHtml(poster.copy_pack?.wechat || "")}</p>
+    <div class="mk-poster-actions">
+      <button type="button" class="topbar-button primary" data-poster-download>下载海报</button>
+      <button type="button" class="topbar-button" data-poster-copy>复制文案</button>
+    </div>
+  `;
+}
+
+async function openPromoPosterPlugin(options = {}) {
+  if (!state.currentStoreId) {
+    notifyError("请先选择门店");
+    return;
+  }
+  if (typeof openHomeChatMode === "function") openHomeChatMode();
+  showTaskView("促销海报", "<p class='profile-bill-empty'>正在出稿…</p>");
+  try {
+    const pack = await fetchJson(`/stores/${encodeURIComponent(state.currentStoreId)}/plugins/promo-poster`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: options.prompt || "",
+        occasion: options.occasion || null,
+        offer: options.offer || null,
+        dish: options.dish || null,
+      }),
+    });
+    state.promoPoster = pack;
+    if (pack.wallet) {
+      state.commercialBoard = { ...(state.commercialBoard || {}), wallet: pack.wallet };
+      renderWalletBanner();
+    }
+    showTaskView("促销海报", renderPromoPosterBody(pack));
+  } catch (error) {
+    showTaskView("促销海报", `<p>海报出稿失败：${escapeHtml(error.message)}</p>`);
+    notifyError(error.message);
+  }
+}
+
+function downloadPromoPosterPng() {
+  const poster = state.promoPoster?.poster;
+  if (!poster) {
+    notifyError("还没有海报");
+    return;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = 750;
+  canvas.height = 1000;
+  const ctx = canvas.getContext("2d");
+  const colors = poster.colors || {};
+  ctx.fillStyle = colors.bg || "#C23A2B";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = colors.accent || "#F4C430";
+  ctx.fillRect(0, 0, canvas.width, 18);
+  ctx.fillStyle = colors.ink || "#FFF8EE";
+  ctx.font = "600 28px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(poster.kicker || "促销", 56, 120);
+  ctx.font = "700 36px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(poster.store_name || "门店", 56, 180);
+  ctx.font = "800 52px 'PingFang SC','Microsoft YaHei',sans-serif";
+  wrapPosterText(ctx, poster.headline || "", 56, 280, 638, 64);
+  ctx.font = "700 44px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(poster.dish || "", 56, 520);
+  ctx.fillStyle = colors.accent || "#F4C430";
+  ctx.font = "800 48px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(poster.offer || "", 56, 600);
+  ctx.fillStyle = colors.ink || "#FFF8EE";
+  ctx.font = "400 28px 'PingFang SC','Microsoft YaHei',sans-serif";
+  wrapPosterText(ctx, poster.subhead || "", 56, 680, 638, 40);
+  ctx.font = "600 24px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(poster.period || "", 56, 860);
+  ctx.globalAlpha = 0.8;
+  ctx.font = "400 20px 'PingFang SC','Microsoft YaHei',sans-serif";
+  ctx.fillText(poster.footnote || "", 56, 920);
+  ctx.globalAlpha = 1;
+  const link = document.createElement("a");
+  link.download = `${poster.store_name || "门店"}-促销海报.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+  notifySuccess("海报已下载");
+}
+
+function wrapPosterText(ctx, text, x, y, maxWidth, lineHeight) {
+  const chars = String(text || "").split("");
+  let line = "";
+  let cursor = y;
+  chars.forEach((ch) => {
+    const next = line + ch;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      ctx.fillText(line, x, cursor);
+      line = ch;
+      cursor += lineHeight;
+    } else {
+      line = next;
+    }
+  });
+  if (line) ctx.fillText(line, x, cursor);
+}
+
+async function copyPromoPosterText() {
+  const text = state.promoPoster?.poster?.copy_pack?.wechat || "";
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    notifySuccess("文案已复制");
+  } catch (_error) {
+    notifyError("复制失败，请手动选中文案");
   }
 }
 
@@ -566,12 +939,16 @@ async function submitInterviewAnswer(answer, options = {}) {
 }
 
 async function askStoreManager(question, options = {}) {
-  if (!state.currentStoreId) return;
+  if (!state.currentStoreId) {
+    notifyError("门店还在加载，请稍等几秒再问我。");
+    return;
+  }
   const stayOnHome =
     (Boolean(options.stayOnHome) || document.body.classList.contains("view-home")) &&
     document.body.classList.contains("view-home");
   const trimmed = question.trim();
   const attachments = Array.isArray(options.attachments) ? options.attachments : [];
+  const workThreadId = String(options.workThreadId || currentWorkThreadId?.() || "").trim();
   if (!trimmed && !attachments.length) return;
 
   const input = qs("#aiChatInput");
@@ -628,12 +1005,28 @@ async function askStoreManager(question, options = {}) {
       }
     }
 
+    if (looksLikePromoPosterPrompt(trimmed) && !attachments.length) {
+      if (state.chatMessages.length && state.chatMessages[state.chatMessages.length - 1].pending) {
+        state.chatMessages.pop();
+      }
+      appendChatMessage("assistant", "海报已经打开。有活动、上新或午市需要时再用，不占日常入口。");
+      await openPromoPosterPlugin({ prompt: trimmed });
+      return;
+    }
+
+    // Decision Core 前端意图拦截:活动测算 / 利润诊断
+    if (!attachments.length && typeof handleDecisionCoreIntent === "function") {
+      const handled = await handleDecisionCoreIntent(trimmed);
+      if (handled) return;
+    }
+
     let response = null;
     if (attachments.length) {
       response = await (async () => {
         const form = new FormData();
         form.set("question", trimmed);
         form.set("days", "7");
+        if (workThreadId) form.set("work_thread_id", workThreadId);
         attachments.forEach((file) => form.append("files", file, file.name));
         const res = await fetch(`/workspace/stores/${state.currentStoreId}/ask-rich`, {
           method: "POST",
@@ -680,13 +1073,13 @@ async function askStoreManager(question, options = {}) {
           response = await fetchJson(`/v1/stores/${state.currentStoreId}/intent`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: trimmed }),
+            body: JSON.stringify({ text: trimmed, work_thread_id: workThreadId || null }),
           });
         } catch (_intentError) {
           response = await fetchJson(`/workspace/stores/${state.currentStoreId}/ask`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: trimmed, days: 7 }),
+            body: JSON.stringify({ question: trimmed, days: 7, work_thread_id: workThreadId || null }),
           });
         }
       }
@@ -721,6 +1114,7 @@ async function askStoreManager(question, options = {}) {
     }
     if (response.workspace) {
       state.runtimeWorkspace = response.workspace;
+      state.pendingWorkThreadId = response.workspace?.center?.active_thread_id || workThreadId || null;
     }
     if (response.daily_plan) {
       state.dailyPlan = response.daily_plan.plan || response.daily_plan;
@@ -743,9 +1137,16 @@ async function askStoreManager(question, options = {}) {
       }
       notifySuccess("已记住你的偏好");
     }
+    if (attachments.length) {
+      await loadHomeWorkspace(state.currentStoreId).catch(() => null);
+    }
     if (stayOnHome) {
+      const needsHomeRefresh = !response.workspace;
+      if (needsHomeRefresh && !attachments.length) {
+        await loadHomeWorkspace(state.currentStoreId).catch(() => null);
+      }
       // 优先吃 /intent 返回的最新 runtime；拿不到时再整页刷新兜底
-      if (!response.workspace) {
+      if (needsHomeRefresh && attachments.length) {
         await loadDashboard(state.currentStoreId).catch(() => null);
       }
       renderWorkRail();
@@ -761,6 +1162,13 @@ async function askStoreManager(question, options = {}) {
       var _title = _guide.title || (response.intent === "platform" ? "AI 协助对接" : "AI 协助上手");
       var _body = renderAssistGuideBody(_guide);
       showTaskView(_title, _body);
+    } else if (response.intent === "promo_poster" || response.plugin === "promo_poster") {
+      state.promoPoster = response;
+      if (response.wallet) {
+        state.commercialBoard = { ...(state.commercialBoard || {}), wallet: response.wallet };
+        renderWalletBanner();
+      }
+      showTaskView("促销海报", renderPromoPosterBody(response));
     } else if (response.intent === "storefront" && !stayOnHome) {
       showTaskView("线上装修", "<p>已准备装修方案，请在首页确认。</p>");
     } else if (response.intent === "goal" || response.intent === "understanding_update") {
@@ -778,6 +1186,9 @@ async function askStoreManager(question, options = {}) {
     }
     notifyError(error.message);
   } finally {
+    if (!state.runtimeWorkspace?.center?.active_thread_id) {
+      state.pendingWorkThreadId = workThreadId || state.pendingWorkThreadId || null;
+    }
     if (attachments.length) clearHomeAttachments();
     if (input) input.disabled = false;
     if (homeInput) homeInput.disabled = false;
@@ -844,6 +1255,44 @@ async function decideOperatingEvent(fingerprint, decision, button) {
       button.disabled = false;
       button.textContent = original;
     }
+  }
+}
+
+async function collectPlatformIntelNow() {
+  const buttons = [qs("#collectPlatformIntelBtn"), qs("#settingsCollectIntelBtn")].filter(Boolean);
+  const originals = buttons.map((button) => button.textContent);
+  buttons.forEach((button) => {
+    button.disabled = true;
+    button.textContent = "采集中…";
+  });
+  try {
+    const storeId = state.currentStoreId;
+    const path = storeId
+      ? `/v1/stores/${storeId}/platform-intel/collect`
+      : "/v1/platform-intel/collect";
+    const result = await fetchJson(path, { method: "POST" });
+    state.platformIntel = await fetchJson("/v1/platform-intel?limit=20").catch(
+      () => state.platformIntel,
+    );
+    renderPlatformIntelPanel();
+    if (result.status === "failed") {
+      throw new Error(result.error || "官网采集失败，没有编造活动");
+    }
+    const added = result.new_count || 0;
+    notifySuccess(
+      added
+        ? `官网公开页已更新：新增 ${added} 条政策/活动`
+        : result.error
+          ? `已访问官网，部分源失败：${result.error}`
+          : "已访问官网公开页，没有新的政策/活动",
+    );
+  } catch (error) {
+    notifyError(error.message);
+  } finally {
+    buttons.forEach((button, index) => {
+      button.disabled = false;
+      button.textContent = originals[index];
+    });
   }
 }
 
@@ -1081,6 +1530,22 @@ async function saveStoreSettings(event) {
   });
   await loadDashboard(state.currentStoreId);
   notifySuccess("门店资料已保存");
+}
+
+async function saveStoreOpsRoster(event) {
+  event.preventDefault();
+  if (!state.currentStoreId) return;
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form).entries());
+  delete data.task_url;
+  const result = await fetchJson(`/settings/stores/${state.currentStoreId}/ops-roster`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  state.settingsOverview = { ...(state.settingsOverview || {}), store_ops: result.store_ops, checklist: result.checklist };
+  renderSettingsOverview();
+  notifySuccess("门店执行人已保存。把任务页发给店长。");
 }
 
 async function saveMenuSettings(event) {

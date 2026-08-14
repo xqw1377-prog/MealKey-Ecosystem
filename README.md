@@ -28,9 +28,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 - 看板：http://127.0.0.1:8000/
 - 设置：侧栏「设置」或底部「AI协助上手」
-- API：http://127.0.0.1:8000/docs
+- API 文档（仅开发）：http://127.0.0.1:8000/docs
 
-本地默认 **SQLite**，不需要 Redis / Celery。定时任务是可选增强。
+本地默认 **SQLite**，不需要 Redis / Celery。定时任务是可选增强。生产关闭 `/docs`，CORS 必须配置 `CORS_ORIGINS` 域名白名单，节律只跑 Celery beat。
 
 ### 大模型智能引擎（独立部署副本）
 

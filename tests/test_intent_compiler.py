@@ -33,6 +33,7 @@ CASES: list[tuple[str, str, str | None, object]] = [
     ("改一下标题", "action", "action_type", "change_title"),
     ("差评怎么回复", "action", "action_type", "batch_reply_negative_reviews"),
     ("帮我批量回复差评", "action", "action_type", "batch_reply_negative_reviews"),
+    ("帮我把好评回了", "action", "action_type", "reply_ordinary_reviews"),
     ("上个29元套餐", "action", "action_type", "add_set_meal"),
     ("帮我推出套餐", "action", "action_type", "add_set_meal"),
     ("500块广告费帮我花掉", "action", "action_type", "boost_hero_item_ads"),

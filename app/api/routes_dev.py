@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -196,6 +197,22 @@ def seed_demo(db: Session = Depends(get_db)):
 
     db.commit()
     return {"merchant_id": merchant.id, "store_id": store.id, "item_id": item.id}
+
+
+@router.post("/open-test-access")
+def open_test_access(store_id: str = "", db: Session = Depends(get_db)):
+    """用户测试门店：开通 MOS / 自动权限 / 订阅 / mock 平台连接。生产环境不可用。"""
+    if not settings.is_dev:
+        raise HTTPException(status_code=403, detail="open-test-access is only available in development")
+    from app.services.test_store_access import open_all_test_stores, open_test_store_access
+
+    sid = (store_id or "").strip()
+    if sid:
+        store = db.execute(select(Store).where(Store.id == sid)).scalar_one_or_none()
+        if store is None:
+            raise HTTPException(status_code=404, detail="store not found")
+        return {"count": 1, "stores": [open_test_store_access(db, store)]}
+    return open_all_test_stores(db)
 
 
 @router.post("/attribute-experiments/{store_id}")

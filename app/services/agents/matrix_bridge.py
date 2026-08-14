@@ -36,6 +36,7 @@ def _build_matrix_input(db: Session, ctx: _AgentContext) -> MatrixAgentInput:
         days=ctx.days,
         sibling_stores=list(siblings),
         experiments=ctx.experiments,
+        ads_observed=bool(getattr(ctx.store_state.data_coverage, "ads_observed", False)),
     )
 
 def _with_action_gates(

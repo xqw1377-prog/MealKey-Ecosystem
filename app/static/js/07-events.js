@@ -20,6 +20,9 @@ function bindEvents() {
   qs("#scanCompetitionWorkbenchBtn").addEventListener("click", scanCompetitionNow);
   qs("#runCollectionNowBtn").addEventListener("click", scanCompetitionNow);
   qs("#openCollectionConnectBtn").addEventListener("click", () => openCollectionModal());
+  qs("#collectPlatformIntelBtn")?.addEventListener("click", () => {
+    collectPlatformIntelNow().catch((error) => notifyError(error.message));
+  });
   qs("#openMobileGuideBtn").addEventListener("click", () => openCollectionModal());
   qs("#generateConnectCodeBtn").addEventListener("click", generateMobileConnectCode);
   qs("#copyMobileGuideBtn").addEventListener("click", copyMobileConnectionGuide);
@@ -38,6 +41,21 @@ function bindEvents() {
     event.preventDefault();
     event.stopPropagation();
     openOwnerProfileModal();
+  });
+  qs("#sidebarOwnerBtn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openOwnerProfileModal();
+  });
+  qs("#ownerBillCycles")?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-bill-cycle]");
+    if (!card) return;
+    subscribeOwnerBillCycle(card.dataset.billCycle).catch((error) => notifyError(error.message));
+  });
+  qs("#ownerWalletTopups")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-wallet-topup]");
+    if (!btn) return;
+    topupOwnerWallet(btn.dataset.walletTopup).catch((error) => notifyError(error.message));
   });
   qs("#ownerProfileForm")?.addEventListener("submit", saveOwnerProfile);
   qs("#ownerAvatarPickBtn")?.addEventListener("click", () => qs("#ownerAvatarFileInput")?.click());
@@ -94,6 +112,136 @@ function bindEvents() {
     if (feedItem) startRailCardDrag(feedItem, event.dataTransfer);
   });
   qs("#mkDecisionHost")?.addEventListener("click", async (event) => {
+    const platformBtn = event.target.closest("[data-loop-execute-platform]");
+    if (platformBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const loopId = platformBtn.dataset.loopExecutePlatform;
+      const storeId = state.currentStoreId;
+      if (!loopId || !storeId) return;
+      platformBtn.disabled = true;
+      try {
+        await executeLoopPlatform(storeId, loopId);
+        notifySuccess("已经改到平台并读回确认。这件事进入观察，到期我会回来看结果。");
+        await loadHomeWorkspace(storeId);
+      } catch (error) {
+        platformBtn.disabled = false;
+        notifyError(error.message || "没能写回平台，这件事还停在现在");
+      }
+      return;
+    }
+    const evidenceBtn = event.target.closest("[data-loop-evidence]");
+    if (evidenceBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const loopId = evidenceBtn.dataset.loopEvidence;
+      const storeId = state.currentStoreId;
+      if (!loopId || !storeId) return;
+      const note = qs("#mkLoopEvidenceNote")?.value || "";
+      evidenceBtn.disabled = true;
+      try {
+        await attachLoopEvidence(storeId, loopId, { kind: "note", note, by: "OWNER" });
+        notifySuccess("证据已记下。有证据后才能点门店已做完。");
+        await loadHomeWorkspace(storeId);
+      } catch (error) {
+        evidenceBtn.disabled = false;
+        notifyError(error.message || "没能记下证据");
+      }
+      return;
+    }
+    const executedBtn = event.target.closest("[data-loop-executed]");
+    if (executedBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const loopId = executedBtn.dataset.loopExecuted;
+      const storeId = state.currentStoreId;
+      if (!loopId || !storeId) return;
+      executedBtn.disabled = true;
+      try {
+        await markLoopExecuted(storeId, loopId);
+        notifySuccess("已记下。这件事进入观察，到期我会回来看结果。");
+        await loadHomeWorkspace(storeId);
+      } catch (error) {
+        executedBtn.disabled = false;
+        notifyError(error.message || "没能记下执行状态");
+      }
+      return;
+    }
+    const skipBtn = event.target.closest("[data-loop-skip]");
+    if (skipBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const loopId = skipBtn.dataset.loopSkip;
+      const storeId = state.currentStoreId;
+      if (!loopId || !storeId) return;
+      skipBtn.disabled = true;
+      try {
+        await markLoopNotExecuted(storeId, loopId);
+        notifySuccess("好，这一次先不改。");
+        await loadHomeWorkspace(storeId);
+      } catch (error) {
+        skipBtn.disabled = false;
+        notifyError(error.message || "没能记下");
+      }
+      return;
+    }
+    const ackBtn = event.target.closest("[data-loop-ack]");
+    if (ackBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const loopId = ackBtn.dataset.loopAck;
+      const storeId = state.currentStoreId;
+      if (!loopId || !storeId) return;
+      ackBtn.disabled = true;
+      try {
+        await markLoopAcked(storeId, loopId);
+        notifySuccess("记下了。下次同类问题我会按这次结果排序。");
+        await loadHomeWorkspace(storeId);
+      } catch (error) {
+        ackBtn.disabled = false;
+        notifyError(error.message || "没能记下");
+      }
+      return;
+    }
+    const shareBtn = event.target.closest("[data-loop-share]");
+    if (shareBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const loopId = shareBtn.dataset.loopShare;
+      const storeId = state.currentStoreId;
+      if (!loopId || !storeId) return;
+      shareBtn.disabled = true;
+      try {
+        const result = await shareLoopResultCard(storeId, loopId);
+        const card = result.share_card || {};
+        const url = `${window.location.origin}${card.share_url || `/r/${card.id}`}`;
+        const text = `${card.wechat_copy || "一家外卖店刚做出结果。点开就能免费测自己的店。"}\n${url}`;
+        try {
+          await navigator.clipboard.writeText(text);
+          notifySuccess("结果卡已复制，发给同行就能测店");
+        } catch (_copyError) {
+          notifySuccess(url);
+        }
+      } catch (error) {
+        notifyError(error.message || "还不能分享这次结果");
+      } finally {
+        shareBtn.disabled = false;
+      }
+      return;
+    }
+    const copyBtn = event.target.closest("[data-copy-text]");
+    if (copyBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        const text = decodeURIComponent(copyBtn.dataset.copyText || "");
+        await navigator.clipboard.writeText(text);
+        notifySuccess("执行包已复制，去美团后台按步骤用");
+      } catch (_error) {
+        notifyError("复制失败，请手动选中文案");
+      }
+      return;
+    }
     const opt = event.target.closest("[data-intent-fill]");
     if (!opt) return;
     if (typeof confirmInterviewChoice === "function") {
@@ -142,6 +290,68 @@ function bindEvents() {
   qs("#commandBarLiveVoiceBtn")?.addEventListener("click", toggleVoiceInput);
   qs("#commandBarAudioToolBtn")?.addEventListener("click", () => {
     qs("#commandBarAudioInput")?.click();
+  });
+  qs("#commandBarCostBtn")?.addEventListener("click", () => {
+    qs("#commandBarCostInput")?.click();
+  });
+  qs("#commandBarPosterBtn")?.addEventListener("click", () => {
+    openPromoPosterPlugin().catch((error) => notifyError(error.message));
+  });
+  qs("#mkWalletBanner")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openOwnerProfileModal({ focus: "wallet" });
+  });
+  qs("#commandBarCostInput")?.addEventListener("change", (event) => {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+    uploadCostSheet(file).catch((error) => notifyError(error.message || "成本表上传失败"));
+    event.target.value = ""; // reset for re-upload
+  });
+  qs("#mkDataCoveragePanel")?.addEventListener("click", (event) => {
+    const importBtn = event.target.closest("[data-seed-import]");
+    if (importBtn) {
+      event.preventDefault();
+      if (typeof startSeedImport === "function") startSeedImport(importBtn.dataset.seedImport);
+      return;
+    }
+    const slaBtn = event.target.closest("[data-sla-loop]");
+    if (slaBtn) {
+      event.preventDefault();
+      const fake = document.createElement("button");
+      fake.dataset.railId = slaBtn.dataset.slaLoop || "";
+      fake.dataset.railSlot = slaBtn.dataset.slaSlot || "need";
+      fake.dataset.workThreadId = slaBtn.dataset.slaLoop || "";
+      const strong = document.createElement("strong");
+      strong.textContent = slaBtn.dataset.slaTitle || "经营事项";
+      fake.appendChild(strong);
+      if (typeof enterWorkFromRail === "function") enterWorkFromRail(fake);
+      return;
+    }
+  });
+  qs("#commandBarImportBtn")?.addEventListener("click", () => {
+    const next = state.seedLaunch?.onboarding?.next;
+    if (next?.key && typeof startSeedImport === "function") {
+      startSeedImport(next.key);
+      return;
+    }
+    const choice = prompt(
+      "选择要导入的数据类型：\n1. 经营数据(曝光/订单/GMV)\n2. 推广投流(花费/点击/CPC)\n3. 评价数据(评分/内容)\n4. 活动数据(活动规则/补贴)\n5. 订单明细(真实销量)\n6. 运营指标(IM回复率/准时率)\n\n输入数字(1-6):",
+      "1",
+    );
+    const typeMap = { "1": "funnel", "2": "ads", "3": "reviews", "4": "campaigns", "5": "orders", "6": "ops" };
+    const importType = typeMap[(choice || "").trim()];
+    if (!importType) return;
+    state.pendingImportType = importType;
+    qs("#commandBarImportInput")?.click();
+  });
+  qs("#commandBarImportInput")?.addEventListener("change", (event) => {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+    const importType = state.pendingImportType || "funnel";
+    state.pendingImportType = null;
+    uploadBusinessData(file, importType).catch((error) => notifyError(error.message || "数据导入失败"));
+    event.target.value = "";
   });
   qs("#commandBarChips")?.addEventListener("click", (event) => {
     const upload = event.target.closest("[data-command-action='upload']");
@@ -289,6 +499,22 @@ function bindEvents() {
   qs("#storeSettingsForm")?.addEventListener("submit", (event) => {
     saveStoreSettings(event).catch((error) => notifyError(error.message));
   });
+  qs("#storeOpsForm")?.addEventListener("submit", (event) => {
+    saveStoreOpsRoster(event).catch((error) => notifyError(error.message));
+  });
+  qs("#copyStoreTaskLinkBtn")?.addEventListener("click", async () => {
+    const url = qs("#storeOpsForm")?.elements?.task_url?.value || "";
+    if (!url) {
+      notifyError("请先保存店长姓名，生成任务页");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      notifySuccess("已复制门店任务页，发给店长");
+    } catch {
+      notifyInfo(url);
+    }
+  });
   qs("#menuSettingsForm")?.addEventListener("submit", (event) => {
     saveMenuSettings(event).catch((error) => notifyError(error.message));
   });
@@ -301,6 +527,9 @@ function bindEvents() {
   qs("#demoConnectBtn")?.addEventListener("click", demoConnectAndSync);
   qs("#settingsConnectPlatformBtn")?.addEventListener("click", () => {
     connectSelectedPlatform().catch((error) => notifyError(error.message));
+  });
+  qs("#settingsCollectIntelBtn")?.addEventListener("click", () => {
+    collectPlatformIntelNow().catch((error) => notifyError(error.message));
   });
   qs("#assistDeployBtn")?.addEventListener("click", () => {
     loadAssist("deploy").catch((error) => notifyError(error.message));
@@ -475,6 +704,18 @@ function bindEvents() {
       return;
     }
 
+    const copyPack = target.closest("[data-copy-text]");
+    if (copyPack) {
+      try {
+        const text = decodeURIComponent(copyPack.dataset.copyText || "");
+        await navigator.clipboard.writeText(text);
+        notifySuccess("执行包已复制，去美团后台按步骤用");
+      } catch (_error) {
+        notifyError("复制失败，请手动选中文案");
+      }
+      return;
+    }
+
     const intentFill = target.closest("[data-intent-fill]");
     if (intentFill) {
       const text = (intentFill.dataset.intentFill || intentFill.textContent || "").trim();
@@ -486,6 +727,33 @@ function bindEvents() {
       await askStoreManager(text, {
         stayOnHome: document.body.classList.contains("view-home"),
       });
+      return;
+    }
+
+    const openWallet = target.closest("[data-open-wallet]");
+    if (openWallet) {
+      openOwnerProfileModal({ focus: "wallet" });
+      return;
+    }
+
+    const posterTheme = target.closest("[data-poster-theme]");
+    if (posterTheme) {
+      openPromoPosterPlugin({
+        prompt: state.promoPoster?.poster?.dish || "",
+        occasion: posterTheme.dataset.posterTheme,
+      }).catch((error) => notifyError(error.message));
+      return;
+    }
+
+    const posterDownload = target.closest("[data-poster-download]");
+    if (posterDownload) {
+      downloadPromoPosterPng();
+      return;
+    }
+
+    const posterCopy = target.closest("[data-poster-copy]");
+    if (posterCopy) {
+      copyPromoPosterText().catch((error) => notifyError(error.message));
       return;
     }
 
@@ -535,6 +803,12 @@ function bindEvents() {
     const actionButton = target.closest("[data-recommendation-action]");
     if (actionButton) {
       await mutateRecommendation(actionButton.dataset.recommendationAction, actionButton.dataset.recommendationId);
+      return;
+    }
+
+    const costButton = target.closest("[data-cost-upload]");
+    if (costButton) {
+      qs("#commandBarCostInput")?.click();
       return;
     }
 

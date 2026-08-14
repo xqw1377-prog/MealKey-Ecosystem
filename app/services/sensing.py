@@ -75,6 +75,10 @@ def build_platform_health_state(
     hero_sku_in_stock_rate: Optional[float] = 1.0,
     activity_valid: Optional[bool] = True,
     open_status: str = "open",
+    im_reply_rate: Optional[float] = None,
+    meal_prep_rate: Optional[float] = None,
+    on_time_delivery_rate: Optional[float] = None,
+    merchant_cancel_rate: Optional[float] = None,
 ) -> PlatformHealthState:
     """V1 uses available proxies; missing platform ops metrics stay unknown."""
 
@@ -123,30 +127,50 @@ def build_platform_health_state(
         HealthSignal(
             key="meal_prep_rate",
             label="出餐率",
-            value=None,
-            status="unknown",
-            note="待平台运营指标接入",
+            value=meal_prep_rate,
+            unit="pct",
+            status=_status_from_threshold(
+                (meal_prep_rate * 100) if meal_prep_rate is not None else None,
+                good_above=90,
+            ),
+            threshold=0.9,
+            note=None if meal_prep_rate is not None else "待导入运营指标",
         ),
         HealthSignal(
             key="im_reply_rate",
             label="IM回复率",
-            value=None,
-            status="unknown",
-            note="待平台运营指标接入",
+            value=im_reply_rate,
+            unit="pct",
+            status=_status_from_threshold(
+                (im_reply_rate * 100) if im_reply_rate is not None else None,
+                good_above=90,
+            ),
+            threshold=0.9,
+            note=None if im_reply_rate is not None else "待导入运营指标",
         ),
         HealthSignal(
             key="on_time_delivery_rate",
             label="配送准时率",
-            value=None,
-            status="unknown",
-            note="待平台运营指标接入",
+            value=on_time_delivery_rate,
+            unit="pct",
+            status=_status_from_threshold(
+                (on_time_delivery_rate * 100) if on_time_delivery_rate is not None else None,
+                good_above=90,
+            ),
+            threshold=0.9,
+            note=None if on_time_delivery_rate is not None else "待导入运营指标",
         ),
         HealthSignal(
             key="merchant_cancel_rate",
             label="商责取消率",
-            value=None,
-            status="unknown",
-            note="待平台运营指标接入",
+            value=merchant_cancel_rate,
+            unit="pct",
+            status=_status_from_threshold(
+                (merchant_cancel_rate * 100) if merchant_cancel_rate is not None else None,
+                good_below=3,
+            ),
+            threshold=0.03,
+            note=None if merchant_cancel_rate is not None else "待导入运营指标",
         ),
     ]
 
@@ -196,8 +220,25 @@ def build_platform_health_state(
         hero_sku_in_stock_rate=hero_sku_in_stock_rate,
         decoration_completeness=decoration_completeness,
         activity_valid=activity_valid,
+        im_reply_rate=im_reply_rate,
+        meal_prep_rate=meal_prep_rate,
+        on_time_delivery_rate=on_time_delivery_rate,
+        merchant_cancel_rate=merchant_cancel_rate,
         signals=signals,
     )
+
+
+def _map_cost_source(raw: Optional[str]) -> str:
+    """映射业务层 cost_source 到 MoneyItem 合法 source 枚举。"""
+    if not raw:
+        return "merchant_input"
+    r = raw.lower()
+    if "platform" in r or "api" in r:
+        return "platform"
+    if "estimate" in r or "ai" in r or "proxy" in r:
+        return "estimated"
+    # owner_cost_sheet / manual_input / observed → merchant_input
+    return "merchant_input"
 
 
 def _proxy_contribution(
@@ -226,48 +267,109 @@ def build_profit_state(
     baseline_orders: Optional[float] = None,
     merchant_subsidy_proxy_rate: float = 0.08,
     commission_proxy_rate: float = 0.22,
+    # ── 真实成本数据(Track B) ──
+    food_cost: Optional[float] = None,
+    packaging_cost: Optional[float] = None,
+    refund_cost: Optional[float] = None,
+    cost_source: Optional[str] = None,
+    cost_confidence: Optional[str] = None,
 ) -> ProfitState:
     if gross_gmv is None:
         return ProfitState(data_quality="missing", judgment="利润数据不足，活动/投流建议将更保守。")
 
     ads = float(ads_spend or 0)
-    contribution_profit, take_home, per_order = _proxy_contribution(
-        gross_gmv=gross_gmv,
-        orders=orders,
-        ads_spend=ads,
-        merchant_subsidy_proxy_rate=merchant_subsidy_proxy_rate,
-        commission_proxy_rate=commission_proxy_rate,
-    )
     customer_paid = gross_gmv
     platform_commission = gross_gmv * commission_proxy_rate
     merchant_subsidy = gross_gmv * merchant_subsidy_proxy_rate
 
-    take_home_delta = None
-    contribution_delta = None
-    if baseline_gmv is not None and baseline_gmv > 0:
-        baseline_profit, baseline_thr, _ = _proxy_contribution(
-            gross_gmv=baseline_gmv,
-            orders=baseline_orders,
+    # ── 判断是否有真实成本(Track B 核心) ──
+    has_real_cost = food_cost is not None or packaging_cost is not None
+    missing_blocks: list[str] = []
+    if food_cost is None:
+        missing_blocks.append("food_cost")
+    if packaging_cost is None:
+        missing_blocks.append("packaging_cost")
+    if ads_spend is None:
+        missing_blocks.append("ads_spend")
+
+    if has_real_cost:
+        # 有真实成本 → 用 calculate_profit 算真账
+        # calculate_profit 设计为单订单级,会乘以 orders 得到 total
+        # 这里传入总量、orders=1,拿到的就是门店级总量(不再二次乘)
+        from app.services.decision_core import calculate_profit
+
+        # 映射 cost_source 到 MoneyItem 合法 source
+        mi_source = _map_cost_source(cost_source)
+
+        result = calculate_profit(
+            customer_paid=customer_paid,
+            platform_commission=platform_commission,
+            merchant_subsidy=merchant_subsidy,
+            food_cost=food_cost,
+            packaging_cost=packaging_cost,
+            ads_allocation=ads,
+            refund_compensation=refund_cost,
+            orders=1,  # 总量已聚合,不再按订单放大
+            food_cost_source=mi_source,
+            packaging_cost_source=mi_source,
+        )
+        contribution_profit = result.breakdown.contribution_profit or 0.0
+        take_home = contribution_profit / customer_paid if customer_paid else None
+        per_order = (contribution_profit / orders) if orders else None
+        data_quality = "observed"
+    else:
+        # 没有真实成本 → 回落 proxy,但明确标记
+        contribution_profit, take_home, per_order = _proxy_contribution(
+            gross_gmv=gross_gmv,
+            orders=orders,
             ads_spend=ads,
             merchant_subsidy_proxy_rate=merchant_subsidy_proxy_rate,
             commission_proxy_rate=commission_proxy_rate,
         )
+        data_quality = "proxy"
+
+    take_home_delta = None
+    contribution_delta = None
+    if baseline_gmv is not None and baseline_gmv > 0:
+        if has_real_cost:
+            from app.services.decision_core import calculate_profit
+
+            baseline_result = calculate_profit(
+                customer_paid=baseline_gmv,
+                platform_commission=baseline_gmv * commission_proxy_rate,
+                merchant_subsidy=baseline_gmv * merchant_subsidy_proxy_rate,
+                food_cost=food_cost,
+                packaging_cost=packaging_cost,
+                ads_allocation=ads,
+                refund_compensation=refund_cost,
+                orders=1,
+                food_cost_source=_map_cost_source(cost_source),
+                packaging_cost_source=_map_cost_source(cost_source),
+            )
+            baseline_profit = baseline_result.breakdown.contribution_profit or 0.0
+            baseline_thr = baseline_profit / baseline_gmv if baseline_gmv else None
+        else:
+            baseline_profit, baseline_thr, _ = _proxy_contribution(
+                gross_gmv=baseline_gmv,
+                orders=baseline_orders,
+                ads_spend=ads,
+                merchant_subsidy_proxy_rate=merchant_subsidy_proxy_rate,
+                commission_proxy_rate=commission_proxy_rate,
+            )
         if baseline_profit > 0:
             contribution_delta = ((contribution_profit - baseline_profit) / baseline_profit) * 100.0
         if baseline_thr and take_home is not None and baseline_thr > 0:
             take_home_delta = ((take_home - baseline_thr) / baseline_thr) * 100.0
 
-    judgment = "利润口径目前为代理估算（佣金/补贴），接入真实账单后会更准。"
-    if take_home is not None and take_home < 0.55:
-        judgment = f"到手率约 {take_home:.0%}，活动与投流必须过利润门禁，避免买流水。"
-    elif take_home is not None and take_home >= 0.65:
-        judgment = f"到手率约 {take_home:.0%}，增长动作空间相对更健康。"
-    if contribution_delta is not None and take_home_delta is not None:
-        if contribution_delta > take_home_delta + 3:
-            judgment = (
-                f"贡献利润 {contribution_delta:+.1f}% ，到手率 {take_home_delta:+.1f}%。"
-                " 利润跌幅小于流水时，不建议为冲单量重开大额优惠。"
-            )
+    # ── 判断生成 ──
+    judgment = _build_profit_judgment(
+        take_home=take_home,
+        contribution_delta=contribution_delta,
+        take_home_delta=take_home_delta,
+        data_quality=data_quality,
+        missing_blocks=missing_blocks,
+        has_real_cost=has_real_cost,
+    )
 
     return ProfitState(
         gross_gmv=gross_gmv,
@@ -276,15 +378,53 @@ def build_profit_state(
         platform_commission=platform_commission,
         merchant_subsidy=merchant_subsidy,
         ads_spend=ads,
+        food_cost=food_cost,
+        packaging_cost=packaging_cost,
+        refund_cost=refund_cost,
         take_home_rate=take_home,
         take_home_rate_delta_pct=take_home_delta,
         contribution_margin=take_home,
         contribution_profit=contribution_profit,
         contribution_profit_delta_pct=contribution_delta,
         contribution_profit_per_order=per_order,
-        data_quality="proxy",
+        data_quality=data_quality,
+        missing_blocks=missing_blocks,
         judgment=judgment,
     )
+
+
+def _build_profit_judgment(
+    *,
+    take_home: Optional[float],
+    contribution_delta: Optional[float],
+    take_home_delta: Optional[float],
+    data_quality: str,
+    missing_blocks: list[str],
+    has_real_cost: bool,
+) -> str:
+    """生成利润判断文本,明确标注数据质量。"""
+    parts: list[str] = []
+
+    if data_quality == "proxy":
+        blocks_text = "、".join(missing_blocks) if missing_blocks else "成本"
+        parts.append(f"利润为代理估算(缺 {blocks_text})，上传成本表后会更准。")
+    elif data_quality == "observed":
+        parts.append("利润基于真实成本计算。")
+
+    if take_home is not None:
+        if take_home < 0.55:
+            parts.append(f"到手率约 {take_home:.0%}，活动与投流必须过利润门禁，避免买流水。")
+        elif take_home >= 0.65:
+            parts.append(f"到手率约 {take_home:.0%}，增长动作空间相对更健康。")
+
+    if contribution_delta is not None and take_home_delta is not None:
+        if contribution_delta > take_home_delta + 3:
+            parts.append(
+                f"贡献利润 {contribution_delta:+.1f}%，到手率 {take_home_delta:+.1f}%。"
+                "利润跌幅小于流水时，不建议为冲单量重开大额优惠。"
+            )
+
+    return " ".join(parts) if parts else ""
 
 
 def build_benchmark_state(

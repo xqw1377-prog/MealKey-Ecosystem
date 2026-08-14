@@ -7,9 +7,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, ShopFunnelDaily, Store
+from app.models.entities import ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, ReviewFact, ShopFunnelDaily, Store
 from app.models.settings import PlatformConnection
-from app.services.platform_connectors import PlatformSnapshot, fetch_platform_snapshot
+from app.services.platform_connectors import (
+    PlatformDailyMetric,
+    PlatformMenuItem,
+    PlatformReview,
+    PlatformSnapshot,
+    fetch_platform_snapshot,
+)
 
 
 def _ensure_menu(db: Session, store_id: str) -> Menu:
@@ -50,6 +56,7 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
             category=row.category,
             price=row.price,
             description=row.description,
+            image_url=row.image_url,
             source=f"platform:{snapshot.platform}",
         )
         db.add(version)
@@ -73,6 +80,7 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
                 orders=metric.orders,
                 gmv=metric.gmv,
                 aov=metric.aov,
+                data_source="synthetic" if snapshot.synthetic else "platform_sync",
             )
         )
         metric_days += 1
@@ -97,8 +105,11 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
                         gmv=item_gmv,
                         ctr=round(item_visits / item_impressions, 4) if item_impressions else None,
                         cvr=round(item_orders / item_visits, 4) if item_visits else None,
+                        data_source="synthetic",
                     )
                 )
+
+    reviews_upserted = _upsert_snapshot_reviews(db, store.id, snapshot)
 
     store.platform = snapshot.platform
     store.platform_store_key = snapshot.external_store_id
@@ -115,15 +126,28 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
     if connection is None:
         connection = PlatformConnection(store_id=store.id, platform=snapshot.platform)
         db.add(connection)
+    meta = _load_meta(connection.meta_json)
+    raw_meta = snapshot.raw if isinstance(snapshot.raw, dict) else {}
+    source_mode = str(raw_meta.get("source") or "").strip().lower()
+    if source_mode not in {"mobile", "oauth", "http", "mock"}:
+        source_mode = "mock" if snapshot.synthetic else (connection.connector_mode or "http")
     connection.status = "connected"
     connection.external_store_id = snapshot.external_store_id
-    connection.connector_mode = "mock" if snapshot.synthetic else connection.connector_mode or "http"
+    connection.connector_mode = source_mode
     connection.last_sync_at = datetime.now(timezone.utc)
     connection.last_error = None
-    connection.meta_json = json.dumps(
-        {"synthetic": snapshot.synthetic, "menu_count": created_or_updated, "metric_days": metric_days},
-        ensure_ascii=False,
+    meta.update(
+        {
+            "synthetic": snapshot.synthetic,
+            "menu_count": created_or_updated,
+            "metric_days": metric_days,
+            "reviews": reviews_upserted,
+            "source": source_mode,
+        }
     )
+    if raw_meta:
+        meta["snapshot"] = raw_meta
+    connection.meta_json = json.dumps(meta, ensure_ascii=False)
     db.add(connection)
     db.flush()
 
@@ -133,6 +157,7 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
         "external_store_id": snapshot.external_store_id,
         "menu_upserted": created_or_updated,
         "metric_days": metric_days,
+        "reviews_upserted": reviews_upserted,
         "synthetic": snapshot.synthetic,
         "connection_id": connection.id,
     }
@@ -182,6 +207,35 @@ def sync_store_platform(
 # ═══ P2-7: 多平台数据对齐 ═══
 
 
+def _upsert_snapshot_reviews(db: Session, store_id: str, snapshot: PlatformSnapshot) -> int:
+    upserted = 0
+    for review in snapshot.reviews or []:
+        review_id = str(review.review_id or "").strip()
+        if not review_id:
+            continue
+        source = f"platform:{snapshot.platform}:{review_id}"
+        existing = db.execute(
+            select(ReviewFact).where(ReviewFact.store_id == store_id, ReviewFact.source == source).limit(1)
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = ReviewFact(
+                store_id=store_id,
+                rating=float(review.rating or 0) or None,
+                content=review.content or "",
+                reviewed_at=datetime.now(timezone.utc),
+                source=source,
+            )
+            db.add(existing)
+        else:
+            existing.rating = float(review.rating or existing.rating or 0) or existing.rating
+            existing.content = review.content or existing.content
+        if review.replied and review.reply_text:
+            existing.reply_text = review.reply_text
+            existing.replied_at = existing.replied_at or datetime.now(timezone.utc)
+        upserted += 1
+    return upserted
+
+
 def merge_multi_platform_snapshots(
     snapshots: list[Any],
 ) -> PlatformSnapshot:
@@ -190,6 +244,7 @@ def merge_multi_platform_snapshots(
     合并规则：
     - menu_items: 按名称去重合并（同名取价格更高的）
     - daily_metrics: 按日期合并（orders/gmv 相加）
+    - reviews: 按 review_id 去重
     - store_name: 取第一个
     """
     if not snapshots:
@@ -197,29 +252,45 @@ def merge_multi_platform_snapshots(
     if len(snapshots) == 1:
         return snapshots[0]
 
-    # 合并 menu_items
     seen_names: dict[str, PlatformMenuItem] = {}
     for snap in snapshots:
         for item in snap.menu_items:
             name_key = item.name.strip().lower()
             if name_key not in seen_names:
                 seen_names[name_key] = item
-            else:
-                # 同名取价格更高的
-                if item.price > seen_names[name_key].price:
-                    seen_names[name_key] = item
+            elif (item.price or 0) > (seen_names[name_key].price or 0):
+                seen_names[name_key] = item
 
-    # 合并 daily_metrics
-    metrics_by_day: dict[str, dict] = {}
+    metrics_by_day: dict[Any, dict] = {}
     for snap in snapshots:
         for metric in snap.daily_metrics:
-            day = metric.day or "unknown"
+            day = metric.day
             if day not in metrics_by_day:
-                metrics_by_day[day] = {"day": day, "impressions": 0, "visits": 0, "orders": 0, "gmv": 0.0}
-            metrics_by_day[day]["impressions"] += metric.impressions
-            metrics_by_day[day]["visits"] += metric.visits
-            metrics_by_day[day]["orders"] += metric.orders
-            metrics_by_day[day]["gmv"] += metric.gmv
+                metrics_by_day[day] = {
+                    "day": day,
+                    "impressions": 0,
+                    "visits": 0,
+                    "add_to_cart": 0,
+                    "payments": 0,
+                    "orders": 0,
+                    "gmv": 0.0,
+                }
+            bucket = metrics_by_day[day]
+            bucket["impressions"] += metric.impressions or 0
+            bucket["visits"] += metric.visits or 0
+            bucket["add_to_cart"] += metric.add_to_cart or 0
+            bucket["payments"] += metric.payments or 0
+            bucket["orders"] += metric.orders or 0
+            bucket["gmv"] += metric.gmv or 0.0
+            if bucket["orders"]:
+                bucket["aov"] = round(bucket["gmv"] / bucket["orders"], 2)
+
+    reviews_by_id: dict[str, PlatformReview] = {}
+    for snap in snapshots:
+        for review in snap.reviews or []:
+            key = str(review.review_id or "").strip()
+            if key and key not in reviews_by_id:
+                reviews_by_id[key] = review
 
     return PlatformSnapshot(
         platform="multi",
@@ -227,4 +298,65 @@ def merge_multi_platform_snapshots(
         store_name=snapshots[0].store_name,
         menu_items=list(seen_names.values()),
         daily_metrics=[PlatformDailyMetric(**m) for m in metrics_by_day.values()],
+        reviews=list(reviews_by_id.values()),
+        synthetic=any(bool(getattr(s, "synthetic", False)) for s in snapshots),
     )
+
+
+def sync_all_platforms(
+    db: Session,
+    store: Store,
+    *,
+    mode: str | None = None,
+) -> dict[str, Any]:
+    """拉取该店已连接的全部平台，合并后再写入 StoreState 事实表。"""
+    connections = db.execute(
+        select(PlatformConnection).where(PlatformConnection.store_id == store.id)
+    ).scalars().all()
+    platforms = [row.platform for row in connections if row.platform]
+    if not platforms:
+        platforms = [store.platform or "meituan"]
+
+    snapshots: list[PlatformSnapshot] = []
+    errors: list[dict[str, str]] = []
+    for platform in platforms:
+        conn = next((row for row in connections if row.platform == platform), None)
+        use_mode = (mode or (conn.connector_mode if conn else None) or "mock").strip().lower()
+        if use_mode not in {"mock", "http", "mobile", "oauth"}:
+            use_mode = "mock"
+        try:
+            snapshots.append(
+                fetch_platform_snapshot(
+                    platform,
+                    store_id=store.id,
+                    mode=use_mode,
+                    store_name=store.name,
+                    external_store_id=(conn.external_store_id if conn else store.platform_store_key),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"platform": platform, "error": str(exc)})
+            if conn is not None:
+                conn.status = "error"
+                conn.last_error = str(exc)
+                db.add(conn)
+
+    if not snapshots:
+        raise ValueError("没有可合并的平台数据：" + "；".join(f"{e['platform']}: {e['error']}" for e in errors))
+
+    merged = merge_multi_platform_snapshots(snapshots)
+    result = apply_platform_snapshot(db, store, merged)
+    result["mode"] = mode or "mixed"
+    result["platforms"] = [snap.platform for snap in snapshots]
+    result["errors"] = errors
+    return result
+
+
+def _load_meta(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}

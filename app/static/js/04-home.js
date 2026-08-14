@@ -136,6 +136,7 @@ function isRailCardTransfer(dataTransfer) {
 function buildRailCardPayload(item) {
   if (!item) return null;
   const kind = String(item.dataset.railWork || "ask").trim() || "ask";
+  const workThreadId = String(item.dataset.workThreadId || "").trim();
   const title =
     item.querySelector("strong")?.textContent?.trim() ||
     item.getAttribute("aria-label") ||
@@ -145,6 +146,7 @@ function buildRailCardPayload(item) {
   return {
     kind,
     title,
+    work_thread_id: workThreadId || "",
     prompt: prompt || `关于「${title}」，现在我该怎么处理？`,
   };
 }
@@ -170,6 +172,7 @@ function readRailCardTransfer(dataTransfer) {
 function ingestRailCardToChat(payload, { replace = false, source = "drag" } = {}) {
   const text = String(payload?.prompt || "").trim();
   if (!text) return;
+  state.pendingWorkThreadId = String(payload?.work_thread_id || "").trim() || state.pendingWorkThreadId || null;
   if (typeof closeMobileSheets === "function") closeMobileSheets();
   document.body.classList.add("view-home");
   document.body.classList.remove("view-module", "workspace-focus");
@@ -178,6 +181,18 @@ function ingestRailCardToChat(payload, { replace = false, source = "drag" } = {}
   notifySuccess(
     source === "drag" ? "已把卡片内容带到对话栏，补一句需求后可直接发送" : "我已把这条经营事项带到对话栏",
   );
+}
+
+function currentWorkThreadId() {
+  const pending = String(state.pendingWorkThreadId || "").trim();
+  if (pending) return pending;
+  const focus = currentNeedCard?.() || null;
+  const focusThread = String(focus?.work_thread_id || focus?.loop_id || "").trim();
+  if (focusThread) return focusThread;
+  const loopThread = String(currentLoop?.()?.work_thread_id || "").trim();
+  if (loopThread) return loopThread;
+  const active = String(state.runtimeWorkspace?.center?.active_thread_id || "").trim();
+  return active || "";
 }
 
 function speechRecognitionCtor() {
@@ -258,6 +273,8 @@ function renderHomeShell() {
   renderOpsQueue();
   if (typeof renderStoreProfileCard === "function") renderStoreProfileCard();
   applyOwnerProfileUI(state.ownerProfile || state.settingsOverview?.owner);
+  if (typeof renderWalletBanner === "function") renderWalletBanner();
+  if (typeof renderAdsSummaryPanel === "function") renderAdsSummaryPanel();
 }
 
 function actionButtonConfig(action) {
@@ -331,10 +348,16 @@ function enrichBriefWithDashboard() {
 
 function renderStoreSelector() {
   const select = qs("#storeSelect");
+  if (!select) return;
   select.innerHTML = state.stores
-    .map((store) => `<option value="${store.id}" ${store.id === state.currentStoreId ? "selected" : ""}>${escapeHtml(store.name)}</option>`)
+    .map((store) => {
+      const meta = [store.city, store.category].filter(Boolean).join(" · ");
+      const label = meta ? `${store.name} · ${meta}` : store.name;
+      return `<option value="${store.id}" ${store.id === state.currentStoreId ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
     .join("");
-  qs("#bootstrapBtn").style.display = state.stores.length ? "none" : "";
+  const bootstrapBtn = qs("#bootstrapBtn");
+  if (bootstrapBtn) bootstrapBtn.style.display = state.stores.length ? "none" : "";
 }
 
 function renderTopbar() {
@@ -782,6 +805,11 @@ function decisionActionsHtml(actions) {
           label,
         )}</button>`;
       }
+      if (action.kind === "upload_cost") {
+        return `<button class="action-button ${escapeHtml(className || "primary")}" type="button" data-cost-upload="1">${escapeHtml(
+          label,
+        )}</button>`;
+      }
       if (action.scroll_target || action.scroll) {
         return `<button class="action-button ${escapeHtml(className || "ghost")}" type="button" data-scroll-target="${escapeHtml(
           action.scroll_target || action.scroll,
@@ -832,6 +860,8 @@ function decisionCardHtml(card, { compact = false } = {}) {
       <h3>${escapeHtml(card.title)}</h3>
       ${fiveQs}
       ${actions ? `<div class="ops-queue-actions">${actions}</div>` : ""}
+      ${card.recommendation_id && (card.queue_bucket === "working" || card.arbiter_state === "auto_do") ? `<div class="ops-queue-actions" style="margin-top:4px;"><button class="rec-preview-btn" data-rec-preview="${escapeHtml(card.recommendation_id)}">预览变更</button></div>` : ""}
+      ${card.recommendation_id && card.queue_bucket === "result" ? `<div class="ops-queue-actions" style="margin-top:4px;"><button class="rec-rollback-btn" data-rec-rollback="${escapeHtml(card.recommendation_id)}">回滚</button></div>` : ""}
     </article>`;
 }
 
@@ -958,7 +988,7 @@ function interviewGapKeys() {
 
 function interviewKeyFromCard(card) {
   const id = String(card?.id || "");
-  const matched = id.match(/^understanding:(.+)$/);
+  const matched = id.match(/^(?:understanding:|mue:)(.+)$/);
   const fromId = matched ? String(matched[1] || "").trim() : "";
   if (fromId && fromId !== "mue_gap" && fromId !== "mue_nl_setting" && fromId !== "mue_ready") {
     return fromId;
@@ -1090,9 +1120,9 @@ function renderInterviewFocus(card) {
   const chipHtml = interviewChipsForCard(card)
     .map(
       (c) =>
-        `<button class="mk-interview-chip" type="button" data-intent-fill="${escapeHtml(c.fill)}">${escapeHtml(
-          c.label,
-        )}</button>`,
+        `<button class="mk-interview-chip" type="button" data-interview-key="${escapeHtml(
+          interviewKind(card) || "",
+        )}" data-intent-fill="${escapeHtml(c.fill)}">${escapeHtml(c.label)}</button>`,
     )
     .join("");
 
@@ -1250,30 +1280,45 @@ function currentRuntimeGuide() {
   return runtimeWorkspacePanels()?.center?.guide || null;
 }
 
+function currentDecisionFlow() {
+  const center = runtimeWorkspacePanels()?.center || {};
+  return center.decision_flow || currentRuntimeGuide()?.decision_flow || null;
+}
+
 function runtimeGuideChoices(guide) {
   return Array.isArray(guide?.choices) ? guide.choices : [];
 }
 
 function runtimeGuideToCard(guide) {
   if (!guide) return null;
+  const flow = guide.decision_flow || currentDecisionFlow() || null;
+  const now = flow?.now || {};
+  const humanGuide = ["QUESTION", "APPROVAL", "FILE_REQUEST"].includes(guide.type);
   const choices = runtimeGuideChoices(guide).map((choice) => ({
     label: choice.label || choice.title || choice.id || "选项",
     fill: choice.prompt || choice.value || choice.label || choice.id || "",
   }));
+  const actions = Array.isArray(guide.actions) && guide.actions.length
+    ? guide.actions
+    : Array.isArray(now.actions)
+      ? now.actions
+      : [];
+  const titleSource = humanGuide ? (guide.title || now.title) : (now.title || guide.title);
+  const promptSource = humanGuide ? (guide.prompt || now.why_now) : (now.why_now || guide.prompt);
   return {
-    id: guide.id || guide.guide_id || "runtime_guide",
+    id: guide.id || now.id || guide.guide_id || "runtime_guide",
     guide_type: guide.type || "INFO",
-    title: guide.prompt || guide.title || "",
-    guide_title: guide.title || "",
-    guide_prompt: guide.prompt || guide.title || "",
-    guide_explanation: guide.explanation || guide.summary || "",
+    title: titleSource || "",
+    guide_title: guide.title || now.title || "",
+    guide_prompt: promptSource || "",
+    guide_explanation: guide.explanation || guide.clock_why || flow?.clock_why || "",
     guide_choices: choices,
     guide_allow_free_text: Boolean(guide.allow_free_text),
     guide_allow_file: Boolean(guide.allow_file),
-    guide_request_label: guide.request_label || "",
-    guide_status: guide.status || "",
+    guide_request_label: guide.request_label || guide.phase_label || "",
+    guide_status: guide.status || guide.phase_label || "",
     guide_cta_label: guide.cta_label || "",
-    interrupt_reason: guide.trigger_reason?.toLowerCase?.() || "confirm",
+    interrupt_reason: guide.trigger_reason?.toLowerCase?.() || "time",
     arbiter_state:
       guide.type === "QUESTION"
         ? "need_input"
@@ -1281,9 +1326,13 @@ function runtimeGuideToCard(guide) {
           ? "confirm"
           : "report_result",
     meta: guide.type || "",
-    why_now: guide.explanation || guide.summary || "",
-    ai_judgment: guide.summary || "",
-    actions: Array.isArray(guide.actions) ? guide.actions : [],
+    why_now: guide.clock_why || now.why_now || guide.explanation || "",
+    if_skip: guide.if_skip || now.if_skip || "",
+    clock_why: guide.clock_why || flow?.clock_why || "",
+    phase_label: guide.phase_label || flow?.phase_label || "",
+    decision_flow: flow,
+    ai_judgment: guide.summary || now.ai_already_did || "",
+    actions,
   };
 }
 
@@ -1299,8 +1348,158 @@ function runtimeFeedItems() {
   return Array.isArray(feed) ? feed : [];
 }
 
+function workItemKey(item) {
+  if (!item) return "";
+  return String(item.id || item.source_card_id || item.source_odo_id || `${item.slot || ""}:${item.title || ""}`).trim();
+}
+
+function findQueueCard(id) {
+  const needle = String(id || "").trim();
+  if (!needle) return null;
+  const left = runtimeWorkspacePanels()?.left || {};
+  const queue = state.managerBrief?.ops_queue || {};
+  const buckets = [
+    left.need_you,
+    left.active,
+    left.waiting,
+    left.completed,
+    left.opportunities,
+    queue.need_you,
+    queue.working,
+    queue.results,
+    queue.opportunities,
+    queue.threads,
+  ];
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket)) continue;
+    const found = bucket.find(
+      (card) =>
+        card &&
+        (card.id === needle ||
+          card.source_card_id === needle ||
+          card.source_odo_id === needle),
+    );
+    if (found) return found;
+  }
+  return null;
+}
+
+function allWorkSources() {
+  const flow = currentDecisionFlow() || {};
+  const left = runtimeWorkspacePanels()?.left || {};
+  const queue = state.managerBrief?.ops_queue || {};
+  const feed = runtimeFeedItems().length ? runtimeFeedItems() : state.managerBrief?.proactive_feed || [];
+  const events = state.operatingEvents?.events || [];
+  const list = [];
+  const push = (slot, kind, source) => {
+    if (!source) return;
+    const title = source.title || source.summary || source.name || "";
+    if (!title && !source.id) return;
+    list.push({
+      slot,
+      kind,
+      source,
+      id: workItemKey({ id: source.id || source.source_card_id || source.source_odo_id, slot, title }),
+      title,
+    });
+  };
+  const loop = currentLoop();
+  if (loop?.id) {
+    push(loop.left?.slot || (loop.waiting ? "waiting" : "need"), "loop", {
+      id: loop.id,
+      title: loop.title,
+      summary: loop.finding,
+      finding: loop.finding,
+      decision: loop.judgment,
+      meta: loop.left?.meta || "",
+    });
+  }
+  if (flow.now?.title) push("flow-now", "flow", flow.now);
+  if (flow.next?.title) push("flow-next", "flow", flow.next);
+  if (flow.later?.title) push("flow-later", "flow", flow.later);
+  (left.need_you || queue.need_you || []).forEach((item) =>
+    push("need", item.kind === "event" ? "event" : "need", item),
+  );
+  (left.active || queue.working || []).forEach((item) => push("active", "thread", item));
+  (left.waiting || []).forEach((item) => push("waiting", "waiting", item));
+  (left.completed || queue.results || []).forEach((item) => push("done", "done", item));
+  (queue.threads || []).forEach((item) => push("active", "thread", item));
+  (Array.isArray(feed) ? feed : []).forEach((item) => push("feed", "event", item));
+  (Array.isArray(events) ? events : []).forEach((item) => push("event", "event", item));
+  return list;
+}
+
+function titlesMatch(a, b) {
+  const left = humanizeDecisionTitle(a || "");
+  const right = humanizeDecisionTitle(b || "");
+  return Boolean(left) && left === right;
+}
+
+function cardFromWorkSource(entry, fallback = {}) {
+  if (!entry?.source && !fallback.title) return null;
+  const src = entry?.source || {};
+  const slot = entry?.slot || fallback.slot || "active";
+  const kind = entry?.kind || fallback.kind || "thread";
+  const queued = findQueueCard(src.id || src.source_card_id || fallback.id) || {};
+  const merged = { ...queued, ...src };
+  const title = merged.title || merged.summary || fallback.title || "经营事项";
+  const key = workItemKey({
+    id: merged.id || src.source_odo_id || fallback.id,
+    slot,
+    title,
+  });
+  const base = {
+    ...merged,
+    id: merged.id || key,
+    title,
+    why_now: merged.why_now || merged.summary || merged.finding || merged.detail || fallback.why || "",
+    ai_judgment:
+      merged.ai_judgment ||
+      merged.decision ||
+      merged.estimated_impact ||
+      merged.finding ||
+      merged.detail ||
+      "",
+    business_impact: merged.business_impact || merged.estimated_impact || "",
+    meta: humanizeDecisionTitle(merged.meta || merged.domain_label || merged.label || fallback.meta || ""),
+    actions: Array.isArray(merged.actions) ? merged.actions : [],
+    focus_kind: kind,
+    focus_slot: slot,
+    focus_key: key,
+  };
+  if (kind === "flow") {
+    base.decision_flow = currentDecisionFlow();
+    base.guide_prompt = merged.why_now || merged.why || base.why_now;
+  }
+  return base;
+}
+
+function resolveFocusedWorkCard() {
+  const key = String(state.focusedWorkKey || "").trim();
+  if (!key) return null;
+  const slot = String(state.focusedWorkSlot || "").trim();
+  const sources = allWorkSources();
+  const idMatch = (item) => item.id === key || item.source?.id === key || item.source?.source_card_id === key;
+  const byIdAndSlot = slot ? sources.find((item) => idMatch(item) && item.slot === slot) : null;
+  if (byIdAndSlot) return cardFromWorkSource(byIdAndSlot);
+  const byId = sources.find(idMatch);
+  if (byId) return cardFromWorkSource(byId);
+  const bySlotTitle = sources.find(
+    (item) => item.slot === slot && (item.title === key || titlesMatch(item.title, key)),
+  );
+  if (bySlotTitle) return cardFromWorkSource(bySlotTitle);
+  const [keySlot, ...rest] = key.split(":");
+  const title = rest.join(":");
+  const byComposite = sources.find(
+    (item) => item.slot === keySlot && (item.title === title || titlesMatch(item.title, title)),
+  );
+  if (byComposite) return cardFromWorkSource(byComposite);
+  const byTitle = sources.find((item) => item.title === key || titlesMatch(item.title, key));
+  if (byTitle) return cardFromWorkSource(byTitle);
+  return null;
+}
+
 function currentNeedCard() {
-  if (state.focusOverrideCard) return state.focusOverrideCard;
   const understanding = state.understanding || {};
   const needYou = state.managerBrief?.ops_queue?.need_you || [];
   const needUnderstanding = needYou.find((item) => isUnderstandingCard(item)) || null;
@@ -1314,6 +1513,9 @@ function currentNeedCard() {
   if (forceUnderstanding) {
     return needUnderstanding || localUnderstandingCard();
   }
+  const focused = resolveFocusedWorkCard();
+  if (focused) return focused;
+  if (state.focusOverrideCard) return state.focusOverrideCard;
   const runtimeGuide = currentRuntimeGuide();
   if (runtimeGuide) return runtimeGuideToCard(runtimeGuide);
   return (
@@ -1464,6 +1666,23 @@ function buildGuideProgressModel(card) {
     };
   }
 
+  const flow = card?.decision_flow || currentDecisionFlow();
+  if (flow?.now?.title) {
+    const short = (text) => {
+      const value = String(text || "").trim();
+      return value.length > 10 ? `${value.slice(0, 10)}…` : value;
+    };
+    return {
+      title: flow.phase_label || "今日决策流",
+      steps: [
+        guideStepState(short(flow.now.title) || "现在", "now"),
+        flow.next?.title ? guideStepState(short(flow.next.title), "next") : null,
+        flow.later?.title ? guideStepState(short(flow.later.title), "next") : null,
+      ].filter(Boolean),
+      foot: flow.clock_why || "",
+    };
+  }
+
   if (thread) {
     const done = (thread.done || []).slice(0, 2).map((label) => guideStepState(label, "done"));
     const doing = (thread.doing || []).slice(0, 1).map((label) => guideStepState(label, "now"));
@@ -1535,6 +1754,395 @@ function renderGuideProgress(card) {
   `;
 }
 
+function currentExecutionPack(card) {
+  return card?.execution_pack || card?.decision_flow?.now?.execution_pack || null;
+}
+
+function renderExecutionPackHtml(pack, options = {}) {
+  if (!pack || !pack.copy_text) return "";
+  const writeable = Boolean(options.writeable);
+  const writeback = pack.writeback || {};
+  const pasteOnly = writeback.mode === "human_paste" || options.pasteOnly;
+  const steps = Array.isArray(pack.steps)
+    ? pack.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")
+    : "";
+  const failLine =
+    writeback.ok === false && writeback.error
+      ? `<p class="mk-guide-watch">上次没写上：${escapeHtml(String(writeback.error))}。可以再试一次，或自己改完点「已修改」。</p>`
+      : writeback.mode === "human_paste"
+        ? `<p class="mk-guide-watch">${escapeHtml(writeback.summary || "请先复制到美团。改完点「已修改」。现在还没写到平台。")}</p>`
+        : "";
+  return `
+    <div class="mk-exec-pack">
+      <p class="mk-exec-kicker">${escapeHtml(pack.title || "执行包")}</p>
+      <pre class="mk-exec-copy">${escapeHtml(pack.copy_text)}</pre>
+      ${steps ? `<ol class="mk-exec-steps">${steps}</ol>` : ""}
+      ${pack.watch ? `<p class="mk-guide-watch">${escapeHtml(pack.watch)}</p>` : ""}
+      ${pack.how_to_use ? `<p class="mk-support">${escapeHtml(pack.how_to_use)}</p>` : ""}
+      ${failLine}
+      ${
+        writeable && !pasteOnly
+          ? ""
+          : `<div class="mk-cta-row">
+        <button type="button" class="action-button ${pasteOnly ? "primary" : "ghost"}" data-copy-text="${encodeURIComponent(
+          pack.copy_text,
+        )}">复制去平台改</button>
+      </div>`
+      }
+    </div>`;
+}
+
+function threadStatusLabel(status, fallback = "") {
+  const key = String(status || "").trim().toUpperCase();
+  return (
+    {
+      DISCOVERED: "新发现",
+      ANALYZING: "分析中",
+      NEED_INFORMATION: "等你补信息",
+      NEED_APPROVAL: "需要你确认",
+      READY_TO_EXECUTE: "待执行",
+      APPROVED: "已确认",
+      EXECUTING: "正在执行",
+      OBSERVING: "观察中",
+      WAITING_RESULT: "结果出来了",
+      COMPLETED: "已完成",
+      NO_EFFECT: "已归档",
+      CANCELLED: "这次未执行",
+      FAILED: "执行失败",
+    }[key] || fallback
+  );
+}
+
+function threadStatusPriority(status, slot = "") {
+  const key = String(status || "").trim().toUpperCase();
+  const group = String(slot || "").trim();
+  const table =
+    group === "active"
+      ? { EXECUTING: 0, APPROVED: 1, ANALYZING: 2, OBSERVING: 3 }
+      : group === "waiting"
+        ? { OBSERVING: 0, WAITING_RESULT: 1 }
+        : group === "done"
+          ? { COMPLETED: 0, NO_EFFECT: 1, CANCELLED: 2, FAILED: 3 }
+          : { NEED_APPROVAL: 0, NEED_INFORMATION: 1, READY_TO_EXECUTE: 2, DISCOVERED: 3 };
+  return Number.isInteger(table[key]) ? table[key] : 99;
+}
+
+function sortWorkItems(items, slot = "") {
+  return [...(items || [])].sort((a, b) => {
+    const diff = threadStatusPriority(a?.thread_status, slot) - threadStatusPriority(b?.thread_status, slot);
+    if (diff !== 0) return diff;
+    const at = String(a?.thread_status_updated_at || a?.updated_at || a?.occurred_at || "");
+    const bt = String(b?.thread_status_updated_at || b?.updated_at || b?.occurred_at || "");
+    if (at && bt && at !== bt) return bt.localeCompare(at);
+    return String(a?.title || a?.name || "").localeCompare(String(b?.title || b?.name || ""), "zh-CN");
+  });
+}
+
+function currentLoop() {
+  return state.runtimeWorkspace?.center?.loop || null;
+}
+
+function loopFocusIds(loop) {
+  if (!loop) return [];
+  return [loop.id, loop.source_card_id, loop.source_event_id].filter(Boolean).map(String);
+}
+
+function isCurrentLoopFocus(loop) {
+  if (!loop) return false;
+  const slot = String(state.focusedWorkSlot || "").trim();
+  if (slot === "flow-next" || slot === "flow-later") return false;
+  const key = String(state.focusedWorkKey || "").trim();
+  if (!key) return true;
+  if (loopFocusIds(loop).includes(key)) return true;
+  if (slot === "flow-now") return true;
+  return false;
+}
+
+function renderLoopHost(loop) {
+  if (!loop) return "";
+  const threadStatus = String(loop.thread_status || "").trim().toUpperCase();
+  const waiting = Boolean(loop.waiting) || threadStatus === "OBSERVING";
+  const resultReady =
+    Boolean(loop.result_ready) ||
+    loop.status === "result_ready" ||
+    threadStatus === "WAITING_RESULT" ||
+    threadStatus === "COMPLETED" ||
+    threadStatus === "NO_EFFECT";
+  const pack = loop.execution_pack || {};
+  const title = humanizeDecisionTitle(loop.title || "当前经营事项");
+  const finding = humanizeDecisionTitle(loop.finding || "");
+  const judgment = humanizeDecisionTitle(loop.judgment || pack.current_problem || "");
+  const metric = humanizeDecisionTitle(loop.success_metric || pack.success_metric || "点击率");
+  const target = loop.success_target || pack.success_target || "";
+  const guard = humanizeDecisionTitle(loop.guardrail || pack.guardrail || "");
+  const resultLine = humanizeDecisionTitle(loop.result_summary || "");
+  if (resultReady) {
+    return `
+      <div class="mk-guide need">
+        <div class="mk-ai-intro">
+          <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+          <p><strong>我回来了。</strong><span>这件事的观察窗到了，结果会改变我下次怎么排动作。</span></p>
+        </div>
+        <div class="mk-ai-status"><span>结果出来了</span></div>
+        <h2 class="mk-question">${escapeHtml(title)}</h2>
+        <p class="mk-support">${escapeHtml(resultLine || `成功标准：${metric}${target ? ` ${target}` : ""}。护栏：${guard || "不要叠改其他变量"}。`)}</p>
+        <div class="mk-cta-row">
+          <button type="button" class="action-button primary" data-loop-ack="${escapeHtml(loop.id)}">
+            <strong>知道了</strong><span>这条闭环先记下</span>
+          </button>
+          <button type="button" class="action-button ghost" data-loop-share="${escapeHtml(loop.id)}">
+            <strong>分享给同行</strong><span>结果卡 · 测一下我的店</span>
+          </button>
+        </div>
+      </div>`;
+  }
+  if (waiting) {
+    const until = loop.observe_until
+      ? new Date(loop.observe_until).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : `${loop.observe_hours || 48} 小时后`;
+    const writeback = (loop.execution_pack || {}).writeback || {};
+    const viaPlatform =
+      String(loop.executor || "") === "PLATFORM" &&
+      String(writeback.mode || "") !== "human_paste" &&
+      writeback.platform_changed !== false;
+    const waitingLead = viaPlatform
+      ? writeback.summary || "我已经改到平台并读回确认。正在观察窗口里等结果，到期会回来告诉你有没有效。"
+      : "我在观察窗口里等结果，到期会回来告诉你有没有效。";
+    return `
+      <div class="mk-guide clear">
+        <div class="mk-ai-intro">
+          <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+          <p><strong>这件事已经记下执行。</strong><span>${escapeHtml(waitingLead)}</span></p>
+        </div>
+        <div class="mk-ai-status quiet"><i></i><span>等待结果 · ${escapeHtml(String(loop.observe_hours || 48))} 小时</span></div>
+        <h2 class="mk-question">${escapeHtml(title)}</h2>
+        <p class="mk-support">成功标准：${escapeHtml(metric)}${target ? ` ${escapeHtml(target)}` : ""}。护栏：${escapeHtml(guard || "不要叠改其他变量")}。</p>
+        <p class="mk-guide-watch">预计 ${escapeHtml(until)} 回来看结果。在此之前不要对同一商品再改第二下。</p>
+      </div>`;
+  }
+  const pasteOnly =
+    String(loop.writeback_mode || pack.writeback?.mode || "") === "human_paste";
+  const writeable = Boolean(loop.platform_writeable) && !pasteOnly;
+  const humanTask = Boolean(loop.human_task);
+  const actionType = String(loop.action_type || pack.action_type || "");
+  const appealTask = actionType === "appeal_pack";
+  const writeCta =
+    actionType === "reply_ordinary_reviews"
+      ? { strong: "帮我回好评", span: "写回并读回确认" }
+      : appealTask
+        ? { strong: "帮我提交申诉", span: "提交并读回工单号" }
+      : { strong: "帮我改到平台", span: "写回并读回确认" };
+  if (humanTask) {
+    const who = loop.assignee_name || "店长";
+    const needed = loop.evidence_needed || pack.evidence_needed || "现场照片或处理说明";
+    const hasEvidence = Boolean(loop.has_evidence);
+    const taskUrl = loop.task_url ? `${location.origin}${loop.task_url}` : "";
+    const evidenceRows = (loop.evidence || [])
+      .map((row) => `<li>${escapeHtml(row.note || "现场照片")} · ${escapeHtml((row.at || "").slice(0, 16))}</li>`)
+      .join("");
+    return `
+    <div class="mk-guide need">
+      <div class="mk-ai-intro">
+        <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+        <p><strong>这件事要门店做完。</strong><span>已派给${escapeHtml(who)}。没有证据不能算做完。</span></p>
+      </div>
+      <div class="mk-ai-status"><span>${hasEvidence ? "证据已交，可以确认做完" : "等待门店交证据"}</span></div>
+      <h2 class="mk-question">${escapeHtml(title)}</h2>
+      ${finding ? `<p class="mk-support">${escapeHtml(finding)}</p>` : ""}
+      <p class="mk-support">必须提交：${escapeHtml(needed)}${loop.due_at ? ` · 截止 ${escapeHtml(String(loop.due_at).slice(0, 16))}` : ""}</p>
+      ${evidenceRows ? `<ul class="mk-evidence-list">${evidenceRows}</ul>` : ""}
+      ${taskUrl ? `<p class="mk-guide-watch">门店任务页：${escapeHtml(taskUrl)}</p>` : `<p class="mk-guide-watch">还没设置店长时，你也可以在这里代交证据。</p>`}
+      <label class="mk-evidence-note">处理说明<textarea id="mkLoopEvidenceNote" rows="2" placeholder="例如：午班已补牛肉、打包改用防漏袋"></textarea></label>
+      <div class="mk-cta-row">
+        <button type="button" class="action-button ghost" data-loop-evidence="${escapeHtml(loop.id)}">
+          <strong>先交证据</strong><span>照片或说明</span>
+        </button>
+        <button type="button" class="action-button ${hasEvidence ? "primary" : "ghost"}" data-loop-executed="${escapeHtml(loop.id)}" ${hasEvidence ? "" : ""}>
+          <strong>门店已做完</strong><span>${hasEvidence ? "进入观察窗" : "没有证据点了也会拦住"}</span>
+        </button>
+        <button type="button" class="action-button ghost" data-loop-skip="${escapeHtml(loop.id)}">
+          <strong>还没做</strong><span>这一次先不改</span>
+        </button>
+      </div>
+    </div>`;
+  }
+  if (appealTask) {
+    const needed = loop.evidence_needed || pack.evidence_needed || "订单记录、聊天截图、现场说明";
+    const hasEvidence = Boolean(loop.has_evidence);
+    const evidenceRows = (loop.evidence || [])
+      .map((row) => `<li>${escapeHtml(row.note || "申诉证据")} · ${escapeHtml((row.at || "").slice(0, 16))}</li>`)
+      .join("");
+    return `
+    <div class="mk-guide need">
+      <div class="mk-ai-intro">
+        <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+        <p><strong>这件事先补齐申诉证据。</strong><span>${escapeHtml(
+          judgment || "证据齐了我就能帮你提交申诉，并读回工单号。",
+        )}</span></p>
+      </div>
+      <div class="mk-ai-status"><span>${hasEvidence ? "证据已就位，可以提交申诉" : "还差申诉证据"}</span></div>
+      <h2 class="mk-question">${escapeHtml(title)}</h2>
+      ${finding ? `<p class="mk-support">${escapeHtml(finding)}</p>` : ""}
+      ${renderExecutionPackHtml(pack, { writeable, pasteOnly })}
+      <p class="mk-support">必须提交：${escapeHtml(needed)}。没有证据不要硬申。</p>
+      ${evidenceRows ? `<ul class="mk-evidence-list">${evidenceRows}</ul>` : ""}
+      <label class="mk-evidence-note">申诉说明<textarea id="mkLoopEvidenceNote" rows="2" placeholder="例如：已核对订单与聊天记录，客诉内容与实际不符"></textarea></label>
+      <div class="mk-cta-row">
+        <button type="button" class="action-button ghost" data-loop-evidence="${escapeHtml(loop.id)}">
+          <strong>先记证据</strong><span>订单/聊天/现场说明</span>
+        </button>
+        <button type="button" class="action-button ${hasEvidence ? "primary" : "ghost"}" data-loop-execute-platform="${escapeHtml(loop.id)}">
+          <strong>${escapeHtml(writeCta.strong)}</strong><span>${escapeHtml(hasEvidence ? writeCta.span : "先补证据再提交")}</span>
+        </button>
+        <button type="button" class="action-button ghost" data-loop-skip="${escapeHtml(loop.id)}">
+          <strong>还没做</strong><span>这一次先不提</span>
+        </button>
+      </div>
+    </div>`;
+  }
+  return `
+    <div class="mk-guide need">
+      <div class="mk-ai-intro">
+        <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+        <p><strong>现在只做这一件事。</strong><span>${escapeHtml(
+          pasteOnly
+            ? judgment || "方案已经准备好。请复制到美团商家端改完，再点「已修改」。现在还没写到平台。"
+            : writeable
+            ? judgment || "方案已经准备好。确认后我会改到平台，读回成功再进入观察。"
+            : judgment || "方案已经准备好，你在平台改完后回来告诉我。",
+        )}</span></p>
+      </div>
+      <div class="mk-ai-status"><span>需要你确认执行</span></div>
+      <h2 class="mk-question">${escapeHtml(title)}</h2>
+      ${finding ? `<p class="mk-support">${escapeHtml(finding)}</p>` : ""}
+      ${renderExecutionPackHtml(pack, { writeable, pasteOnly })}
+      <div class="mk-cta-row">
+        ${
+          writeable
+            ? `<button type="button" class="action-button primary" data-loop-execute-platform="${escapeHtml(loop.id)}">
+          <strong>${escapeHtml(writeCta.strong)}</strong><span>${escapeHtml(writeCta.span)}</span>
+        </button>`
+            : ""
+        }
+        <button type="button" class="action-button ${writeable ? "ghost" : "primary"}" data-loop-executed="${escapeHtml(loop.id)}">
+          <strong>已修改</strong><span>${writeable ? "我自己已经改完了" : "我已经在平台做完了"}</span>
+        </button>
+        <button type="button" class="action-button ghost" data-loop-skip="${escapeHtml(loop.id)}">
+          <strong>还没做</strong><span>这一次先不改</span>
+        </button>
+      </div>
+    </div>`;
+}
+
+function renderDecisionFlowHost(card) {
+  const loop = currentLoop();
+  const slot = card?.focus_slot || "flow-now";
+  const isNow = slot !== "flow-next" && slot !== "flow-later";
+  if (loop && isNow) {
+    return renderLoopHost(loop);
+  }
+  const flow = card?.decision_flow || currentDecisionFlow() || {};
+  const now = flow.now || {};
+  const next = flow.next || {};
+  const later = flow.later || {};
+  const step = slot === "flow-next" ? next : slot === "flow-later" ? later : now;
+  const protect = Boolean(flow.protect_mode);
+  const quiet = Boolean(flow.quiet);
+  const owner = isNow
+    ? now.owner || (card?.guide_type === "APPROVAL" || card?.guide_type === "QUESTION" ? "boss" : "ai")
+    : step.owner || "ai";
+  const introLead = !isNow
+    ? slot === "flow-next"
+      ? "这是下一窗要做的事。"
+      : "这是再之后的安排。"
+    : quiet
+      ? "休息时段，我不打扰你。"
+      : protect
+        ? "高峰保护中，我只盯异常。"
+        : owner === "boss"
+          ? "现在有一件事需要你拍板。"
+          : "这件事我先自己做。";
+  const introBody = !isNow
+    ? step.when
+      ? `计划在${step.when}处理。现在点进来，先把这件事看清楚。`
+      : "还没到窗口，先让你看内容，不会和现在这张卡混在一起。"
+    : flow.clock_why || card?.clock_why || "到点了我再叫你。";
+  const title = humanizeDecisionTitle(card?.title || step.title || now.title || "我继续盯着。");
+  const whyNow = isNow
+    ? card?.guide_prompt || step.why_now || now.why_now || ""
+    : step.why || step.why_now || `到「${step.when || "下一窗"}」再处理「${step.title || title}」。`;
+  const ifSkip = isNow ? now.if_skip || card?.if_skip || "" : "";
+  const showSkip = ifSkip && !/不用做|不需要你做战略|不用拍板/.test(ifSkip);
+  const autoDoing = Array.isArray(flow.auto_doing) ? flow.auto_doing.slice(0, 3) : [];
+  const actions = isNow
+    ? Array.isArray(now.actions) && now.actions.length
+      ? now.actions
+      : card?.actions || []
+    : Array.isArray(step.actions)
+      ? step.actions
+      : [];
+  const primaryAction = pickPrimaryAction(actions);
+  const secondaryAction = pickSecondaryAction(actions, primaryAction);
+  const choices = isNow && Array.isArray(card?.guide_choices) ? card.guide_choices : [];
+  const choiceHtml =
+    !primaryAction && choices.length
+      ? `<div class="mk-choice-grid">
+        ${choices
+          .map(
+            (c) =>
+              `<button type="button" class="mk-choice-card" data-intent-fill="${escapeHtml(
+                c.fill || c.label || "",
+              )}">${escapeHtml(c.label || "选项")}</button>`,
+          )
+          .join("")}
+      </div>`
+      : "";
+  const askLater = `关于「${title}」，${step.when || "到点了"}该怎么做？`;
+  const ctaHtml = primaryAction
+    ? `<div class="mk-cta-row">
+        ${ctaButtonHtml(primaryAction, "primary", primaryAction?.label || "按这个做", "确认后我继续推进")}
+        ${ctaButtonHtml(secondaryAction, "secondary", secondaryAction?.label || "先放一放", "窗口过了再议")}
+      </div>`
+    : choiceHtml ||
+      (!isNow
+        ? `<div class="mk-cta-row">
+        <button type="button" class="action-button primary" data-intent-fill="${escapeHtml(askLater)}">先问店长这件</button>
+      </div>`
+        : "");
+  const railHtml = [now, next, later]
+    .filter((item) => item && item.title && item.title !== step.title)
+    .map((item) => {
+      const label = item === now ? "现在" : item === next ? "下一窗" : "再之后";
+      return `
+        <div class="mk-flow-step">
+          <span>${label}${item.when ? ` · ${escapeHtml(item.when)}` : ""}</span>
+          <strong>${escapeHtml(item.title)}</strong>
+        </div>`;
+    })
+    .join("");
+  const autoHtml = isNow && autoDoing.length
+    ? `<p class="mk-flow-auto">我同时在做：${escapeHtml(autoDoing.map((item) => item.title).join("、"))}</p>`
+    : "";
+  const status = !isNow
+    ? step.when || (slot === "flow-next" ? "下一窗" : "再之后")
+    : flow.phase_label || card?.guide_status || card?.phase_label || "经营节奏";
+  return `
+    <div class="mk-guide flow ${protect ? "protect" : ""} ${quiet ? "quiet" : ""} ${owner === "boss" && isNow ? "need" : "clear"}">
+      <div class="mk-ai-intro">
+        <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+        <p><strong>${escapeHtml(introLead)}</strong><span>${escapeHtml(introBody)}</span></p>
+      </div>
+      <div class="mk-ai-status ${owner === "ai" || !isNow ? "quiet" : ""}"><i></i><span>${escapeHtml(status)}</span></div>
+      <h2 class="mk-question">${escapeHtml(title)}</h2>
+      ${whyNow ? `<p class="mk-support">${escapeHtml(whyNow)}</p>` : ""}
+      ${showSkip ? `<p class="mk-guide-note">如果现在不做：${escapeHtml(ifSkip)}</p>` : ""}
+      ${isNow ? renderExecutionPackHtml(currentExecutionPack(card) || step.execution_pack) : ""}
+      ${ctaHtml}
+      ${autoHtml}
+      ${railHtml ? `<div class="mk-flow-rail">${railHtml}</div>` : ""}
+    </div>`;
+}
+
 function renderRuntimeGuideHost(card) {
   const choices = Array.isArray(card?.guide_choices) ? card.guide_choices : [];
   const choiceHtml = choices.length
@@ -1594,6 +2202,63 @@ function renderRuntimeGuideHost(card) {
     </div>`;
 }
 
+function renderWorkFocusHost(card) {
+  const loop = currentLoop();
+  if (loop && loopFocusIds(loop).includes(String(card?.id || ""))) {
+    return renderLoopHost(loop);
+  }
+  const kind = card?.focus_kind || "thread";
+  const title = humanizeDecisionTitle(card?.title || "经营事项");
+  const why = humanizeDecisionTitle(card?.why_now || card?.guide_prompt || card?.summary || "");
+  const judgment = humanizeDecisionTitle(card?.ai_judgment || card?.finding || card?.detail || "");
+  const impact = humanizeDecisionTitle(card?.business_impact || "");
+  const status =
+    kind === "event"
+      ? "经营发现"
+      : kind === "waiting"
+        ? "等待结果"
+        : kind === "done"
+          ? "最近完成"
+          : "我正在跟进";
+  const introLead =
+    kind === "event"
+      ? "这是我盯到的变化。"
+      : kind === "waiting"
+        ? "这件事还在观察窗口里。"
+        : kind === "done"
+          ? "这件事已经有结果了。"
+          : "这条经营线程我还在推进。";
+  const introBody =
+    kind === "event"
+      ? "发现和建议动作分开看：这里是发生了什么，另一张卡才是现在要不要改。"
+      : "点进来只看这一条，不会再回到第一张建议卡。";
+  const primaryAction = pickPrimaryAction(card?.actions || []);
+  const secondaryAction = pickSecondaryAction(card?.actions || [], primaryAction);
+  const ask = `关于「${title}」，${why || "现在这件事"}怎样了？请按这条线程回答，不要重复另一张卡。`;
+  const ctaHtml = primaryAction
+    ? `<div class="mk-cta-row">
+        ${ctaButtonHtml(primaryAction, "primary", primaryAction?.label || "按这个做", "确认后我继续推进")}
+        ${ctaButtonHtml(secondaryAction, "secondary", secondaryAction?.label || "先放一放", "窗口过了再议")}
+      </div>`
+    : `<div class="mk-cta-row">
+        <button type="button" class="action-button primary" data-intent-fill="${escapeHtml(ask)}">问店长这件事</button>
+      </div>`;
+  const note = [judgment, impact].filter((line) => line && line !== why && line !== title);
+  return `
+    <div class="mk-guide ${kind === "event" || kind === "need" ? "need" : "clear"}">
+      <div class="mk-ai-intro">
+        <img class="mk-ai-mark" src="/static/brand/mealkey-mark.svg" width="28" height="28" alt="" />
+        <p><strong>${escapeHtml(introLead)}</strong><span>${escapeHtml(introBody)}</span></p>
+      </div>
+      <div class="mk-ai-status quiet"><i></i><span>${escapeHtml(status)}</span></div>
+      <h2 class="mk-question">${escapeHtml(title)}</h2>
+      ${why ? `<p class="mk-support">${escapeHtml(why)}</p>` : ""}
+      ${note[0] ? `<p class="mk-guide-note">${escapeHtml(note[0])}</p>` : ""}
+      ${note[1] ? `<p class="mk-guide-watch">${escapeHtml(note[1])}</p>` : ""}
+      ${ctaHtml}
+    </div>`;
+}
+
 function renderDecisionHost(card) {
   const host = qs("#mkDecisionHost");
   if (!host) return;
@@ -1621,7 +2286,6 @@ function renderDecisionHost(card) {
     return;
   }
 
-  /* 理解确认优先于 runtime guide_type，避免 Safe Mode 点进去仍停在经营引导 */
   if (isUnderstandingCard(card)) {
     const copy = interviewCopy(card);
     const chips = interviewChipsForCard(card);
@@ -1653,9 +2317,9 @@ function renderDecisionHost(card) {
           ${chips
             .map(
               (c) =>
-                `<button type="button" class="mk-choice-card" data-intent-fill="${escapeHtml(
-                  c.fill,
-                )}">${escapeHtml(c.label)}</button>`,
+                `<button type="button" class="mk-choice-card" data-interview-key="${escapeHtml(
+                  interviewKind(card) || "",
+                )}" data-intent-fill="${escapeHtml(c.fill)}">${escapeHtml(c.label)}</button>`,
             )
             .join("")}
         </div>
@@ -1667,7 +2331,32 @@ function renderDecisionHost(card) {
     return;
   }
 
-  if (card?.guide_type) {
+  const loop = currentLoop();
+  if (loop && isCurrentLoopFocus(loop)) {
+    host.innerHTML = renderLoopHost(loop);
+    return;
+  }
+
+  const focusKind = card?.focus_kind || "";
+  if (loop && loopFocusIds(loop).includes(String(card?.id || ""))) {
+    host.innerHTML = renderLoopHost(loop);
+    return;
+  }
+  if (["thread", "event", "waiting", "done"].includes(focusKind)) {
+    host.innerHTML = renderWorkFocusHost(card);
+    return;
+  }
+  if (focusKind === "need" && !(Array.isArray(card.actions) && card.actions.length)) {
+    host.innerHTML = renderWorkFocusHost(card);
+    return;
+  }
+
+  if (focusKind === "flow" || (!focusKind && card?.decision_flow?.now?.title)) {
+    host.innerHTML = renderDecisionFlowHost(card);
+    return;
+  }
+
+  if (!focusKind && card?.guide_type) {
     host.innerHTML = renderRuntimeGuideHost(card);
     return;
   }
@@ -1691,6 +2380,7 @@ function renderDecisionHost(card) {
       ${didLine ? `<p class="mk-support">${escapeHtml(didLine)}</p>` : ""}
       ${noteLine ? `<p class="mk-guide-note">${escapeHtml(noteLine)}</p>` : ""}
       ${watchLine ? `<p class="mk-guide-watch">${escapeHtml(watchLine)}</p>` : ""}
+      ${renderExecutionPackHtml(currentExecutionPack(card))}
       <div class="mk-cta-row">
         ${ctaButtonHtml(primaryAction, "primary", primaryAction?.label || "交给 MealKey", "确认后我继续推进")}
         ${ctaButtonHtml(secondaryAction, "secondary", secondaryAction?.label || "看看方案", "先看细节")}
@@ -1711,28 +2401,90 @@ function renderWorkRail() {
     (item) => !item.result || item.result === "pending",
   );
 
-  const runtimeNeedItems = runtimeLeftItems("need_you").slice(0, 4).map((item) => ({
+  const flow = currentDecisionFlow();
+  const loop = currentLoop();
+  const loopId = loop?.id || "";
+  const loopSlot = String(loop?.left?.slot || "").trim();
+  const flowNowItems =
+    flow?.now?.title && (!loop || loopSlot === "need")
+      ? [
+          {
+            id: loopId || workItemKey({ id: flow.now.id || flow.now.source_card_id, slot: "flow-now", title: flow.now.title }),
+            work_thread_id: loop?.work_thread_id || flow.now.work_thread_id || loopId || "",
+            slot: "flow-now",
+            title: loop?.title || flow.now.title,
+            meta: loop?.left?.meta || flow.now.success_metric || flow.now.business_impact || flow.phase_label || "现在",
+            work: !loop || loopSlot === "need" ? "need" : flow.now.owner === "boss" ? "need" : "ask",
+            prompt: loop?.finding || flow.now.why_now
+              ? `关于「${loop?.title || flow.now.title}」，${loop?.finding || flow.now.why_now}`
+              : `关于「${loop?.title || flow.now.title}」，现在怎么做？`,
+            active: true,
+          },
+        ]
+      : [];
+  const flowNextItems = [flow?.next, flow?.later]
+    .filter((step) => step && step.title && step.title !== flow?.now?.title)
+    .map((step, idx) => ({
+      id: workItemKey({ id: step.id || step.source_card_id, slot: idx === 0 ? "flow-next" : "flow-later", title: step.title }),
+      work_thread_id: step.work_thread_id || "",
+      slot: idx === 0 ? "flow-next" : "flow-later",
+      title: step.title,
+      meta: `${idx === 0 ? "下一窗" : "再之后"} · ${step.when || ""}`.trim(),
+      work: "ask",
+      prompt: step.why || step.why_now || `到「${step.when || "下一窗"}」再处理「${step.title}」`,
+    }));
+
+  const runtimeNeedItems = sortWorkItems(runtimeLeftItems("need_you"), "need").slice(0, 4).map((item) => ({
+    id: workItemKey({ id: item.id || item.source_odo_id, slot: item.kind === "event" ? "feed" : "need", title: item.title || item.name }),
+    work_thread_id: item.work_thread_id || item.id || "",
+    thread_status: item.thread_status || "",
+    slot: item.kind === "event" ? "feed" : "need",
     title: item.title || item.name || "需要你确认",
-    meta: item.summary || item.status || item.next_step || "待你拍板",
+    meta:
+      item.meta ||
+      threadStatusLabel(item.thread_status, "") ||
+      item.summary ||
+      item.why_now ||
+      item.status ||
+      item.next_step ||
+      "待你拍板",
     work: "need",
     prompt: item.prompt || (item.title ? `关于「${item.title}」，现在需要我做什么？` : ""),
-    active: true,
   }));
-  const runtimeActiveItems = runtimeLeftItems("active").slice(0, 4).map((item, idx) => ({
+  const runtimeActiveItems = sortWorkItems(runtimeLeftItems("active"), "active").slice(0, 4).map((item, idx) => ({
+    id: workItemKey({ id: item.id || item.source_odo_id, slot: "active", title: item.title || item.name }),
+    work_thread_id: item.work_thread_id || item.id || "",
+    thread_status: item.thread_status || "",
+    slot: "active",
     title: item.title || item.name || "经营线程",
-    meta: item.summary || item.phase || item.status || (idx === 0 ? "AI 处理中" : "进行中"),
+    meta:
+      item.meta ||
+      threadStatusLabel(item.thread_status, "") ||
+      item.summary ||
+      item.why_now ||
+      item.phase ||
+      item.status ||
+      (idx === 0 ? "AI 处理中" : "进行中"),
     work: "ask",
     prompt: item.prompt || (item.title ? `关于「${item.title}」，现在进展怎样？` : ""),
   }));
-  const runtimeWaitingItems = runtimeLeftItems("waiting").slice(0, 3).map((item) => ({
+  const runtimeWaitingItems = sortWorkItems(runtimeLeftItems("waiting"), "waiting").slice(0, 3).map((item) => ({
+    id: workItemKey({ id: item.id || item.source_odo_id, slot: "waiting", title: item.title || item.name }),
+    work_thread_id: item.work_thread_id || item.id || "",
+    thread_status: item.thread_status || "",
+    slot: "waiting",
     title: item.title || item.name || "等待结果",
-    meta: item.summary || item.status || "观察中",
+    meta: item.meta || threadStatusLabel(item.thread_status, "") || item.summary || item.status || "观察中",
     work: "ask",
     prompt: item.prompt || (item.title ? `关于「${item.title}」，结果出来了吗？` : ""),
   }));
-  const runtimeDoneItems = runtimeLeftItems("completed").slice(0, 3).map((item) => ({
+  const runtimeDoneItems = sortWorkItems(runtimeLeftItems("completed"), "done").slice(0, 3).map((item) => ({
+    id: workItemKey({ id: item.id || item.source_odo_id, slot: "done", title: item.title || item.name }),
+    work_thread_id: item.work_thread_id || item.id || "",
+    thread_status: item.thread_status || "",
+    slot: "done",
     title: item.title || item.name || "最近完成",
-    meta: item.summary || item.status || "已完成",
+    meta: item.meta || threadStatusLabel(item.thread_status, "") || item.summary || item.status || "已完成",
     work: "ask",
     prompt: item.prompt || (item.title ? `关于「${item.title}」，帮我复盘下一步` : ""),
   }));
@@ -1742,6 +2494,9 @@ function renderWorkRail() {
     : card
     ? [
         {
+          id: workItemKey({ id: card.id, slot: isUnderstandingCard(card) ? "need" : "need", title: card.title }),
+          work_thread_id: card.work_thread_id || card.id || "",
+          slot: "need",
           title:
             isUnderstandingCard(card)
               ? {
@@ -1767,24 +2522,54 @@ function renderWorkRail() {
                   weekend_strategy: "我会按周几切换强度",
                   competitor_focus: "告诉我最该盯的对手",
                 }[interviewKind(card)] || "这句会影响我接下来怎么经营"
-              : card.meta || "待你拍板",
+              : card.meta || card.why_now || "待你拍板",
           work: isUnderstandingCard(card) ? "talk" : "need",
-          active: true,
         },
       ]
     : [];
 
   const workingSource = runtimeActiveItems.length ? runtimeActiveItems : working.length ? working : threads;
-  const workingItems = workingSource.slice(0, 3).map((item, idx) => ({
-    title: humanizeWorkingTitle(item.title).replace(/^我在盯：/, "") || item.title,
-    meta: item.meta || item.summary || item.next_step || (idx === 0 ? "AI 处理中" : "进行中"),
+  const workingItems = workingSource.slice(0, 4).map((item, idx) => ({
+    id: item.id || workItemKey({ id: item.id, slot: "active", title: item.title }),
+    work_thread_id: item.work_thread_id || item.id || "",
+    slot: item.slot || "active",
+    title: item.title || "经营线程",
+    meta: humanizeDecisionTitle(item.meta || item.summary || item.next_step || (idx === 0 ? "AI 处理中" : "进行中")),
     work: item.work || "ask",
     prompt: item.prompt || `关于「${item.title || ""}」，现在进展怎样？`,
   }));
 
+  const seenKeys = new Set(
+    [...flowNowItems, ...flowNextItems, ...needItems]
+      .map((item) => item.id)
+      .filter(Boolean),
+  );
+  const seenTitles = new Set(
+    [...flowNowItems, ...needItems].map((item) => humanizeDecisionTitle(item.title || "")).filter(Boolean),
+  );
+  const uniqueWorkingItems = workingItems.filter((item) => {
+    const key = item.id;
+    const title = humanizeDecisionTitle(item.title || "");
+    if (key && seenKeys.has(key)) return false;
+    if (title && seenTitles.has(title)) return false;
+    if (key) seenKeys.add(key);
+    if (title) seenTitles.add(title);
+    return true;
+  });
+  const uniqueNeedItems = needItems.filter((item) => {
+    const title = humanizeDecisionTitle(item.title || "");
+    const nowTitle = humanizeDecisionTitle(flow?.now?.title || "");
+    if (item.id && flowNowItems.some((now) => now.id === item.id)) return false;
+    if (title && nowTitle && title === nowTitle) return false;
+    return true;
+  });
+
   const waitingItems = runtimeWaitingItems.length
     ? runtimeWaitingItems
     : experiments.slice(0, 2).map((exp) => ({
+    id: workItemKey({ id: exp.id || exp.recommendation_id, slot: "waiting", title: exp.action_title }),
+    work_thread_id: exp.work_thread_id || exp.recommendation_id || exp.id || "",
+    slot: "waiting",
     title: exp.action_title || "实验观察中",
     meta: exp.notes || "等待结果",
     work: "ask",
@@ -1794,12 +2579,16 @@ function renderWorkRail() {
   const doneItems = runtimeDoneItems.length
     ? runtimeDoneItems
     : results.slice(0, 2).map((item) => ({
+    id: workItemKey({ id: item.id, slot: "done", title: item.title }),
+    work_thread_id: item.work_thread_id || item.id || "",
+    slot: "done",
     title: item.title || "已完成",
     meta: item.summary || "已完成",
     work: "ask",
     prompt: `关于结果「${item.title || ""}」，帮我复盘下一步`,
   }));
 
+  const selectedKey = String(state.focusedWorkKey || flowNowItems[0]?.id || "").trim();
   const section = (title, items, { empty = "暂无" } = {}) => `
       <div class="mk-work-group">
         <p class="mk-work-group-title">${escapeHtml(title)}</p>
@@ -1807,17 +2596,29 @@ function renderWorkRail() {
           items.length
             ? items
                 .map(
-                  (item) => `
-          <button type="button" class="mk-work-item${item.active ? " active" : ""}"
+                  (item) => {
+                    const displayTitle = humanizeDecisionTitle(item.title || "经营事项");
+                    const rawMeta = humanizeDecisionTitle(item.meta || "");
+                    const displayMeta = rawMeta && rawMeta !== displayTitle ? rawMeta : "";
+                    const key = item.id || `${item.slot || ""}:${item.title || ""}`;
+                    const isActive = selectedKey
+                      ? key === selectedKey || item.id === selectedKey
+                      : Boolean(item.active);
+                    return `
+          <button type="button" class="mk-work-item${isActive ? " active" : ""}"
             data-rail-work="${escapeHtml(item.work || "talk")}"
+            data-rail-id="${escapeHtml(item.id || "")}"
+            data-rail-slot="${escapeHtml(item.slot || "")}"
             data-rail-prompt="${escapeHtml(item.prompt || "")}"
+            data-work-thread-id="${escapeHtml(item.work_thread_id || item.id || "")}"
             draggable="true">
             <span class="mk-work-copy">
-              <strong>${escapeHtml(item.title)}</strong>
-              <span>${escapeHtml(item.meta || "")}</span>
+              <strong>${escapeHtml(displayTitle)}</strong>
+              ${displayMeta ? `<span>${escapeHtml(displayMeta)}</span>` : ""}
             </span>
-            ${item.active ? `<span class="mk-work-arrow" aria-hidden="true">›</span>` : ""}
-          </button>`,
+            <span class="mk-work-arrow" aria-hidden="true">›</span>
+          </button>`;
+                  },
                 )
                 .join("")
             : `<p class="mk-work-empty">${escapeHtml(empty)}</p>`
@@ -1827,8 +2628,9 @@ function renderWorkRail() {
   rail.innerHTML = `
     <div class="mk-work-head">工作线程</div>
     <div class="mk-work-body">
-      ${section(`需要你 ${needItems.length || ""}`.trim(), needItems, { empty: "今天没有要你拍板的事" })}
-      ${section(`正在进行 ${workingItems.length || ""}`.trim(), workingItems, { empty: "暂无" })}
+      ${section("今日决策流", [...flowNowItems, ...flowNextItems], { empty: "按节律推进中" })}
+      ${section(`需要你 ${uniqueNeedItems.length || ""}`.trim(), uniqueNeedItems, { empty: "今天没有要你拍板的事" })}
+      ${section(`正在进行 ${uniqueWorkingItems.length || ""}`.trim(), uniqueWorkingItems, { empty: "暂无" })}
       ${section(`等待结果 ${waitingItems.length || ""}`.trim(), waitingItems, { empty: "暂无" })}
       ${section(`最近完成 ${doneItems.length || ""}`.trim(), doneItems, { empty: "暂无" })}
     </div>
@@ -1842,11 +2644,13 @@ function renderContextRail() {
   // 只吃真实 proactive_feed，禁止把左栏 ops_queue 整队列投影成日记噪音
   let feed = runtimeFeedItems();
   if (!feed.length) feed = brief.proactive_feed || [];
+  const loop = currentLoop();
   const focus = currentNeedCard();
   const focusId = focus?.id;
 
-  // 中栏正在问的事，右栏不再重复一条
+  // 同一闭环对象必须同时出现在右栏；其它焦点才去重
   feed = feed.filter((ev) => {
+    if (loop && ev.id === loop.id) return true;
     if (focusId && ev.id === focusId) return false;
     if (isUnderstandingCard(focus) && (ev.reason === "UNDERSTANDING" || ev.label === "需要你告诉我")) {
       return false;
@@ -1876,7 +2680,10 @@ function renderContextRail() {
           return `
           <article class="mk-feed-item ${escapeHtml(status)} clickable"
             data-rail-work="${status === "need_you" ? "need" : "ask"}"
+            data-rail-id="${escapeHtml(ev.id || "")}"
+            data-rail-slot="feed"
             data-rail-prompt="${escapeHtml(ev.summary ? `关于「${ev.summary}」，现在怎样了？` : "")}"
+            data-work-thread-id="${escapeHtml(ev.work_thread_id || ev.id || "")}"
             data-feed-id="${escapeHtml(ev.id || "")}"
             draggable="true"
             tabindex="0"
@@ -2689,9 +3496,9 @@ function runtimeOutputMetaHtml() {
   const dailyPlan = state.dailyPlan || {};
   const guide = currentRuntimeGuide();
   const items = [
-    runtime?.store?.runtime_state ? `当前 ${runtime.store.runtime_state}` : "",
+    runtime?.store?.phase_label || (runtime?.store?.runtime_state ? `当前 ${runtime.store.runtime_state}` : ""),
     dailyPlan?.current_meal_period ? `聚焦 ${dailyPlan.current_meal_period}` : "",
-    guide?.status || "",
+    guide?.phase_label || guide?.status || "",
     meta.candidate_count ? `候选 ${meta.candidate_count}` : "",
     Array.isArray(meta.selected_skills) && meta.selected_skills.length
       ? `调用 ${meta.selected_skills.slice(0, 3).join(" / ")}`
@@ -2716,7 +3523,6 @@ function enterWorkFromDialog(prompt = "") {
 function enterWorkFromRail(item) {
   if (!item) return;
   const kind = item.dataset.railWork || "";
-  const payload = buildRailCardPayload(item);
   if (typeof closeMobileSheets === "function") {
     closeMobileSheets();
   }
@@ -2725,18 +3531,73 @@ function enterWorkFromRail(item) {
     return;
   }
   document.body.classList.add("view-home");
-  document.body.classList.remove("view-module", "workspace-focus");
-  if (kind === "need") {
-    document.body.classList.remove("home-chat-open");
-    showTaskView(railTaskTitle(item), renderNeedTaskBody(item));
+  document.body.classList.remove("view-module", "workspace-focus", "home-chat-open");
+  if (typeof hideTaskView === "function") hideTaskView();
+  const card = focusWorkFromRailElement(item);
+  if (card) {
+    renderDecisionHost(card);
+    syncCommandBarForFocus(card);
+    renderWorkRail();
+    renderContextRail();
+    const main = qs("#section-overview") || qs(".mk-home-main");
+    if (main) main.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
+  const payload = buildRailCardPayload(item);
   if (payload?.prompt) {
     ingestRailCardToChat(payload, { replace: true, source: "click" });
     return;
   }
   openHomeChatMode();
   qs("#homeChatInput")?.focus();
+}
+
+function focusWorkFromRailElement(el) {
+  const title =
+    el.querySelector("strong")?.textContent?.trim() ||
+    el.getAttribute("aria-label") ||
+    "";
+  const id = String(el.dataset.railId || "").trim();
+  const slot = String(el.dataset.railSlot || "").trim();
+  const workThreadId = String(el.dataset.workThreadId || "").trim();
+  const meta = el.querySelector(".mk-work-copy span")?.textContent?.trim() || "";
+  const prompt = String(el.dataset.railPrompt || "").trim();
+  const key = id || (slot && title ? `${slot}:${title}` : title);
+  state.focusedWorkKey = key;
+  state.focusedWorkSlot = slot;
+  state.pendingWorkThreadId = workThreadId || null;
+  const resolved = resolveFocusedWorkCard();
+  if (resolved) {
+    state.focusOverrideCard = resolved;
+    return resolved;
+  }
+  const kind =
+    slot === "feed" || slot === "event"
+      ? "event"
+      : slot === "waiting"
+        ? "waiting"
+        : slot === "done"
+          ? "done"
+          : slot === "need"
+            ? "need"
+            : slot.startsWith("flow")
+              ? "flow"
+              : "thread";
+  const fallback = cardFromWorkSource(null, {
+    id,
+    slot,
+    kind,
+    title: title || "经营事项",
+    why: prompt || meta,
+    meta,
+  });
+  if (fallback) {
+    state.focusOverrideCard = fallback;
+    return fallback;
+  }
+  state.focusedWorkKey = null;
+  state.focusedWorkSlot = null;
+  return null;
 }
 
 
@@ -2978,9 +3839,10 @@ async function confirmInterviewChoice(opt) {
   try {
     if (!state.currentStoreId) throw new Error("门店还在加载，请稍后再点");
     const card = currentNeedCard();
-    const key = isUnderstandingCard(card)
-      ? interviewKeyFromCard(card)
-      : interviewGapKeys()[0];
+    const key =
+      (opt.dataset.interviewKey || "").trim() ||
+      (isUnderstandingCard(card) ? interviewKeyFromCard(card) : "") ||
+      interviewGapKeys()[0];
     const result = await submitInterviewAnswer(text, { key });
     if (!result) throw new Error("确认没有成功，请再点一次");
 
@@ -2990,10 +3852,11 @@ async function confirmInterviewChoice(opt) {
     } else {
       exitExclusivePathMode();
       state.focusOverrideCard = null;
-      await loadHomeWorkspace(state.currentStoreId).catch(() => null);
       renderDecisionHost(currentNeedCard());
       syncCommandBarForFocus(currentNeedCard());
+      renderWorkRail();
       notifySuccess("确认完成，我可以继续自动经营了");
+      loadHomeWorkspace(state.currentStoreId).catch(() => null);
     }
   } catch (error) {
     const payload = error?.payload;
@@ -3001,14 +3864,14 @@ async function confirmInterviewChoice(opt) {
     if (payload?.gap_key || payload?.question) {
       showUnderstandingCard(understandingCardFromInterview(payload));
     }
+    if (status) status.textContent = prevStatus || "还差一些问题";
+    notifyError(error?.message || payload?.detail || "确认失败，请再点一次");
+  } finally {
+    state._interviewBusy = false;
     qsa(".mk-choice-card, .mk-decision-option").forEach((el) => {
       el.disabled = false;
       el.classList.remove("is-busy");
     });
-    if (status) status.textContent = prevStatus || "还差一些问题";
-    notifyError(error?.message || "确认失败，请再点一次");
-  } finally {
-    state._interviewBusy = false;
   }
   return true;
 }

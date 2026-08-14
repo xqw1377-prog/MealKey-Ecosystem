@@ -195,22 +195,30 @@ def run_poie(
     filtered = max(queue.filtered_noop_count, max(0, candidates_total - surfaced))
     queue.filtered_noop_count = filtered
 
-    # P1-5 接入：need_you 决策卡产生站内通知——让 AI 能"找到老板"
+    # 理解缺口才在这里通知；经营 NBA 由 operating_clock.light tick 按节律推，避免高峰刷增长
     if db is not None and queue.need_you:
-        try:
-            from app.services.notification_service import notify_store_owner
+        top_card = queue.need_you[0]
+        is_understanding = (
+            top_card.interrupt_reason == "understanding"
+            or (top_card.meta or "") == "understanding"
+            or str(top_card.id).startswith("understanding:")
+        )
+        if is_understanding:
+            try:
+                from app.services.notification_service import notify_store_owner
 
-            top_card = queue.need_you[0]
-            notify_store_owner(
-                db,
-                store_id=store_id,
-                notification_type="need_you",
-                title=top_card.title[:60],
-                body=(top_card.why_now or top_card.ai_judgment or "")[:200],
-                priority="high" if top_card.arbiter_state == "need_input" else "normal",
-            )
-        except Exception:  # noqa: BLE001 — 通知失败不阻塞 POIE
-            pass
+                notify_store_owner(
+                    db,
+                    store_id=store_id,
+                    notification_type="need_you",
+                    title=top_card.title[:60],
+                    body=(top_card.why_now or top_card.ai_judgment or "")[:200],
+                    priority="high" if top_card.arbiter_state == "need_input" else "normal",
+                    related_decision_id=str(top_card.id)[:64],
+                    clock_phase="understanding",
+                )
+            except Exception:  # noqa: BLE001 — 通知失败不阻塞 POIE
+                pass
 
     # Safe Mode 时产生提醒通知
     if db is not None:

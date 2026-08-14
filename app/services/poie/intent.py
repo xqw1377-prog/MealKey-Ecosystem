@@ -214,4 +214,12 @@ def handle_user_intent(db: Session, store_id: str, question: str) -> Optional[di
             low_risk_ok=u.permissions.low_risk_auto_ok,
         )
 
+    if compiled.kind == "ask":
+        from app.services.operating_demands.handler import handle_demand_intent
+
+        demand_hit = handle_demand_intent(db, store_id, question)
+        if demand_hit is not None:
+            demand_hit["decision"] = compiled.to_decision()
+            return demand_hit
+
     return None

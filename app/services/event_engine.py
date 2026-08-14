@@ -49,7 +49,7 @@ _AUTO_HANDLE_ACTIONS = {
 }
 
 _NEEDS_CONFIRM_ACTIONS = {
-    "change_title", "add_set_meal", "adjust_price_value",
+    "change_title", "reply_ordinary_reviews", "add_set_meal", "adjust_price_value",
     "boost_hero_item_ads", "shift_ads_to_high_cvr_item", "pause_broad_ads",
     "join_lunch_campaign", "launch_value_bundle_promo", "match_competitor_promo",
     "fix_top_review_theme", "menu_patch", "menu_cleanup", "store_discount",

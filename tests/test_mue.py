@@ -32,6 +32,16 @@ def test_bootstrap_knows_store_and_keeps_gaps():
     assert u.principle.startswith("Ask Only")
 
 
+def test_nl_chip_labels_update_priority_without_interview_key():
+    from app.schemas.merchant_understanding import MerchantUnderstanding
+
+    u = MerchantUnderstanding(store_id="s1", open_gaps=["priority_style", "lunch_capacity"])
+    result = apply_nl_update(u, "提高利润")
+    assert result is not None
+    assert result.understanding.preferences.priority_style == "profit"
+    assert "priority_style" not in result.understanding.open_gaps
+
+
 def test_nl_profit_priority_updates_preferences():
     from app.schemas.merchant_understanding import MerchantUnderstanding
 

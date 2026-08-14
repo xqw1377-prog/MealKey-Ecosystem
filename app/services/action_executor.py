@@ -53,12 +53,14 @@ def build_action_draft(compiled: CompiledIntent) -> str:
             "差评回复稿：先致歉、复述问题、给具体补偿或改进，不辩解。"
             "份量/口味类用「已反馈后厨并加一份」模板。"
         )
+    if compiled.action_type == "reply_ordinary_reviews":
+        return "普通好评回复稿：感谢认可，保持口味和出餐速度，不套用差评致歉模板。"
     if compiled.action_type == "add_set_meal":
         return f"套餐方案：以{name}做主菜，配一饮品或小食，价位锚定竞品低 1–2 元。"
     if compiled.action_type == "boost_hero_item_ads":
         budget = compiled.budget
         budget_txt = f"¥{budget:g}" if budget is not None else "先确认预算"
-        return f"投流方案：{budget_txt}，时段对准午高峰，主投{name}，观察 CTR/CVR 48 小时。"
+        return f"投流方案：{budget_txt}，时段对准午高峰，主投{name}，观察点击率/转化率 48 小时。"
     return compiled.detail or compiled.raw_text
 
 
@@ -101,6 +103,19 @@ def execute_compiled_action(
 
     tier = resolve_execution_tier(compiled, system_mode=system_mode, low_risk_ok=low_risk_ok)
     draft = build_action_draft(compiled)
+    pack = None
+    try:
+        from app.services.execution_pack import build_execution_pack
+
+        pack = build_execution_pack(
+            compiled.action_type,
+            object_name=compiled.object_name or "",
+            title=compiled.object_name or compiled.raw_text,
+        )
+        if pack and pack.get("copy_text"):
+            draft = pack["copy_text"]
+    except Exception:  # noqa: BLE001
+        pack = None
     rec = Recommendation(
         store_id=store_id,
         scope="store",
@@ -119,11 +134,18 @@ def execute_compiled_action(
                 "execution_tier": tier,
                 "budget": compiled.budget,
                 "raw_text": compiled.raw_text,
+                "execution_pack": pack,
             },
             ensure_ascii=False,
         ),
     )
     db.add(rec)
+    db.flush()
+
+    # 绑定 work_thread_id
+    from app.services.thread_engine import ensure_thread_for_action
+    thread = ensure_thread_for_action(db, store_id, compiled.object_name or "经营优化")
+    rec.work_thread_id = thread.id
     db.commit()
     db.refresh(rec)
 
@@ -141,6 +163,8 @@ def execute_compiled_action(
     decision["execution_tier"] = tier
     decision["action"] = draft
     decision["recommendation_id"] = rec.id
+    if pack:
+        decision["execution_pack"] = pack
     return {
         "conclusion": conclusion,
         "actions": [draft],
@@ -151,5 +175,6 @@ def execute_compiled_action(
         "mode": "action_executor",
         "question": compiled.raw_text,
         "recommendation_id": rec.id,
+        "execution_pack": pack,
         "decision": decision,
     }

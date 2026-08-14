@@ -8,17 +8,18 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Match
 
-from app.api.routes import build_api_router
+from app.api.routes import iter_api_routers
 from app.core.config import settings
+from app.core.cors import cors_allows_credentials
+from app.core.logging import configure_logging, init_sentry, install_request_id_middleware
 from app.core.security import (
     AuthPrincipal,
     decode_access_token,
     extract_bearer,
     verify_api_token,
 )
-from app.db.base import Base
-from app.db.schema_backfill import apply_sqlite_schema_backfill
 from app.db.session import SessionLocal, engine
 from app.services.competition_collection import (
     backfill_legacy_competitor_watches,
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 # /public 仅 health/config；/auth/token 需在无会话时可用
-PUBLIC_PATH_PREFIXES = ("/public/", "/static/", "/docs", "/openapi.json", "/redoc", "/auth/token")
+PUBLIC_PATH_PREFIXES = ("/public/", "/static/", "/auth/token", "/r/")
 
 # <img src> 无法带 header：仅菜品示意图代理免 token
 _PUBLIC_IMAGE_PATHS = ("/item-image", "/food-image")
@@ -48,7 +49,19 @@ async def lifespan(_app: FastAPI):
             backfill_legacy_competitor_watches(db)
     except Exception as exc:  # noqa: BLE001
         logger.warning("startup backfill failed: %s", exc)
+    clock_stop = None
+    try:
+        from app.services.operating_clock import start_inprocess_clock
+
+        clock_stop = start_inprocess_clock()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("in-process clock failed to start: %s", exc)
     yield
+    if clock_stop is not None:
+        try:
+            clock_stop.set()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _resolve_principal(request: Request) -> AuthPrincipal | None:
@@ -82,31 +95,95 @@ def _store_id_from_path(path: str) -> str | None:
     return store_id
 
 
+class _RoutePathPlaceholder:
+    """仅用于让嵌套路由路径在审计/测试里可见，不参与真实匹配。"""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def matches(self, scope):  # type: ignore[no-untyped-def]
+        return Match.NONE, scope
+
+
+def _expose_included_router_paths(app: FastAPI) -> None:
+    seen = {str(getattr(route, "path", "")) for route in app.router.routes if getattr(route, "path", None)}
+    placeholders = []
+    for route in app.router.routes:
+        contexts = getattr(route, "effective_route_contexts", None)
+        if not callable(contexts):
+            continue
+        for ctx in contexts():
+            path = str(getattr(ctx, "path", "") or "").strip()
+            if not path or path in seen:
+                continue
+            placeholders.append(_RoutePathPlaceholder(path))
+            seen.add(path)
+    app.router.routes.extend(placeholders)
+
+
 def create_app() -> FastAPI:
+    configure_logging(json_logs=settings.json_logs_enabled)
+    init_sentry(dsn=settings.sentry_dsn, environment=str(settings.app_env))
+
     app = FastAPI(
         title="MealKey 餐启 · 外卖智能经营系统",
         version="0.1.0",
         lifespan=lifespan,
+        docs_url="/docs" if settings.is_dev else None,
+        redoc_url="/redoc" if settings.is_dev else None,
+        openapi_url="/openapi.json" if settings.is_dev else None,
     )
 
-    # V1: auto create tables for easy local start; replace with Alembic later
-    Base.metadata.create_all(bind=engine)
-    apply_sqlite_schema_backfill(engine)
+    if settings.is_dev:
+        from app.db.base import Base
+        from app.db.schema_backfill import apply_schema_backfill
+
+        Base.metadata.create_all(bind=engine)
+        apply_schema_backfill(engine)
+    elif settings.run_schema_sync_on_startup:
+        logger.error("FATAL: RUN_SCHEMA_SYNC_ON_STARTUP is not allowed in production; run alembic")
+        raise SystemExit(1)
+    elif settings.run_alembic_on_startup:
+        from app.db.migration_runner import run_alembic_upgrade_head
+
+        run_alembic_upgrade_head()
 
     # 生产环境强制要求 token 或 jwt_secret
     if not settings.is_dev and not settings.api_token and not settings.jwt_secret:
-        import sys
-
         logger.error("FATAL: API_TOKEN or JWT_SECRET must be set in production")
-        sys.exit(1)
+        raise SystemExit(1)
+
+    from fastapi.middleware.cors import CORSMiddleware
+
+    cors_origins = settings.cors_origin_list or (["*"] if settings.is_dev else [])
+    if not settings.is_dev and (not cors_origins or "*" in cors_origins):
+        logger.error("FATAL: production CORS_ORIGINS must be an explicit allowlist, not *")
+        raise SystemExit(1)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=cors_allows_credentials(cors_origins),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    install_request_id_middleware(app)
 
     @app.middleware("http")
     async def api_auth_guard(request: Request, call_next):
         path = request.url.path
 
-        # 公开路径：首页 / 静态 / 文档 / 公开图片代理 / 换票
+        # 生产已关闭文档路由：放行以便返回 404，而不是被鉴权拦成 401
+        if not settings.is_dev and path in {"/docs", "/redoc", "/openapi.json", "/docs/", "/redoc/"}:
+            return await call_next(request)
+
+        # 公开路径：首页 / 静态 / 公开图片代理 / 换票
         if (
             path == "/"
+            or path == "/commercial-os"
+            or path == "/competitive-strategy"
+            or path == "/operating-demands"
+            or path == "/store-tasks"
+            or path.startswith("/r/")
             or any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES)
             or any(path.endswith(suffix) for suffix in _PUBLIC_IMAGE_PATHS)
         ):
@@ -139,7 +216,9 @@ def create_app() -> FastAPI:
         request.state.principal = principal
         return await call_next(request)
 
-    app.include_router(build_api_router())
+    for router_obj, prefix, tags in iter_api_routers():
+        app.include_router(router_obj, prefix=prefix, tags=tags)
+    _expose_included_router_paths(app)
 
     # 双保险：生产环境若仍残留 /dev 路由则剔除
     if not settings.is_dev:
@@ -155,6 +234,26 @@ def create_app() -> FastAPI:
         @app.get("/", include_in_schema=False)
         def product_home():
             return FileResponse(STATIC_DIR / "index.html")
+
+        @app.get("/commercial-os", include_in_schema=False)
+        def commercial_os_v1():
+            return FileResponse(STATIC_DIR / "commercial-os-v1.html")
+
+        @app.get("/competitive-strategy", include_in_schema=False)
+        def competitive_strategy_v1():
+            return FileResponse(STATIC_DIR / "competitive-strategy-v1.html")
+
+        @app.get("/operating-demands", include_in_schema=False)
+        def operating_demand_library():
+            return FileResponse(STATIC_DIR / "operating-demands-v1.html")
+
+        @app.get("/store-tasks", include_in_schema=False)
+        def store_task_board():
+            return FileResponse(STATIC_DIR / "store-tasks.html")
+
+        @app.get("/r/{artifact_id}", include_in_schema=False)
+        def result_share_card(artifact_id: str):
+            return FileResponse(STATIC_DIR / "result-card.html")
 
     return app
 

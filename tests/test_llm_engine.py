@@ -121,3 +121,36 @@ def test_call_llm_without_tools_unchanged(monkeypatch) -> None:
     assert result.ok is True
     assert result.tool_calls is None  # 纯文本模式
     assert result.content == "先优化主图"
+
+
+def test_homepage_read_skips_llm(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
+    called = {"n": 0}
+
+    def fake_chat_completion(**kwargs):
+        called["n"] += 1
+        return ChatResult(content="should not run", prompt_tokens=1, completion_tokens=1, total_tokens=2)
+
+    monkeypatch.setattr("app.services.llm_engine.gateway.chat_completion", fake_chat_completion)
+    from app.services.llm_engine.request_budget import homepage_read_scope
+
+    with homepage_read_scope():
+        result = call_llm(
+            purpose="general.consulting",
+            messages=[{"role": "user", "content": "订单下降怎么办"}],
+        )
+    assert result.ok is False
+    assert result.fallback_to_heuristic is True
+    assert result.reason == "homepage_read_skip_llm"
+    assert called["n"] == 0
+
+
+def test_homepage_read_diagnosis_uses_rules(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-deepseek")
+    monkeypatch.setenv("MEALKY_DIAGNOSIS_LLM", "1")
+    from app.services.diagnosis_reasoner import llm_diagnose_root_cause
+    from app.services.llm_engine.request_budget import homepage_read_scope
+
+    with homepage_read_scope():
+        result = llm_diagnose_root_cause(metric="ctr", delta_pct=-12.0)
+    assert result["source"] == "rule_fallback"

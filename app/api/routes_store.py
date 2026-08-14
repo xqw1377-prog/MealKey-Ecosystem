@@ -7,10 +7,12 @@ from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.entities import Store
 from app.models.ohre import Experiment, Recommendation
 from app.schemas.agents import (
     AgentActionCreateResponse,
@@ -189,8 +191,7 @@ def get_strategy_memory(store_id: str, db: Session = Depends(get_db)):
     return load_strategy_memory(db, store_id)
 
 
-@router.get("/{store_id}/manager_brief", response_model=ManagerHomeBrief)
-def get_manager_brief(store_id: str, days: int = Query(default=7, ge=1), db: Session = Depends(get_db)):
+def _build_manager_brief(store_id: str, *, days: int, db: Session) -> ManagerHomeBrief:
     agents = build_store_agents(db=db, store_id=store_id, days=days)
     if agents is None:
         raise HTTPException(status_code=404, detail="store not found")
@@ -226,7 +227,6 @@ def get_manager_brief(store_id: str, days: int = Query(default=7, ge=1), db: Ses
         action_packages=_brief_action_packages(db, store_id),
         experiments=_brief_experiments(db, store_id),
     )
-    # POIE：Trigger 汇流 → 仲裁 → 投影到首页经营队列
     from app.services.poie import run_poie
 
     poie = run_poie(
@@ -244,6 +244,14 @@ def get_manager_brief(store_id: str, days: int = Query(default=7, ge=1), db: Ses
     return brief
 
 
+@router.get("/{store_id}/manager_brief", response_model=ManagerHomeBrief)
+def get_manager_brief(store_id: str, days: int = Query(default=7, ge=1), db: Session = Depends(get_db)):
+    from app.services.llm_engine.request_budget import homepage_read_scope
+
+    with homepage_read_scope():
+        return _build_manager_brief(store_id, days=days, db=db)
+
+
 @router.post("/{store_id}/daily_job", response_model=DailyJobResult)
 def daily_job(store_id: str, days: int = Query(default=7, ge=1), db: Session = Depends(get_db)):
     result = run_daily_job(db=db, store_id=store_id, days=days)
@@ -254,7 +262,10 @@ def daily_job(store_id: str, days: int = Query(default=7, ge=1), db: Session = D
 
 @router.get("/{store_id}/agents", response_model=StoreAgentsResponse)
 def get_store_agents(store_id: str, days: int = Query(default=7, ge=1), db: Session = Depends(get_db)):
-    payload = build_store_agents(db=db, store_id=store_id, days=days)
+    from app.services.llm_engine.request_budget import homepage_read_scope
+
+    with homepage_read_scope():
+        payload = build_store_agents(db=db, store_id=store_id, days=days)
     if payload is None:
         raise HTTPException(status_code=404, detail="store not found")
     return payload
@@ -629,3 +640,32 @@ def create_store_matrix_agent_action(
     if result is None:
         raise HTTPException(status_code=404, detail="store not found")
     return result
+
+
+class PromoPosterRequest(BaseModel):
+    prompt: str = ""
+    occasion: str | None = None
+    offer: str | None = None
+    dish: str | None = None
+
+
+@router.post("/{store_id}/plugins/promo-poster")
+def post_promo_poster_plugin(
+    store_id: str,
+    payload: PromoPosterRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    store = db.execute(select(Store).where(Store.id == store_id)).scalar_one_or_none()
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    body = payload or PromoPosterRequest()
+    from app.services.promo_poster import build_promo_poster
+
+    return build_promo_poster(
+        db,
+        store,
+        prompt=body.prompt,
+        occasion=body.occasion,
+        offer=body.offer,
+        dish=body.dish,
+    )

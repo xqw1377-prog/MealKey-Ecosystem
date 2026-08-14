@@ -11,6 +11,7 @@ from app.services.llm_engine.bindings import (
 )
 from app.services.llm_engine.client import ChatMessage, chat_completion
 from app.services.llm_engine.failover import execute_with_failover
+from app.services.llm_engine.request_budget import is_homepage_read
 
 
 @dataclass
@@ -47,12 +48,22 @@ def call_llm(
     prefer_model: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
+    timeout_seconds: int = 20,
 ) -> LlmResult:
     """调用 LLM。tools/tool_choice 默认 None，行为与旧版完全一致。
 
     messages 支持完整 OpenAI 消息格式：除 role/content 外，可携带
     tool_calls / tool_call_id / name（function calling 多轮对话用）。
+    首页 GET 只读路径直接跳过，避免同步挂起。
     """
+    if is_homepage_read():
+        return LlmResult(
+            ok=False,
+            purpose=purpose,
+            fallback_to_heuristic=True,
+            reason="homepage_read_skip_llm",
+        )
+
     started = time.perf_counter()
 
     def _run(candidate, api_key: str):
@@ -73,6 +84,7 @@ def call_llm(
             messages=chat_messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
             tools=tools,
             tool_choice=tool_choice,
         )

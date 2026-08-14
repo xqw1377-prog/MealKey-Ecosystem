@@ -88,6 +88,30 @@ def _feedback_note(result: str, lift_pct: float | None) -> str:
     return "近 21 天同类动作仍在观察窗，先不要叠加第二个同类动作。"
 
 
+def _object_tokens(value: str) -> set[str]:
+    text = str(value or "").strip().lower()
+    if not text:
+        return set()
+    tokens = {text}
+    if ":" in text:
+        tokens.add(text.split(":", 1)[-1].strip())
+    return {token for token in tokens if token}
+
+
+def _refs_loosely_match(recommendation: Recommendation, object_ref: str) -> bool:
+    if recommendation.object_ref == object_ref:
+        return True
+    left = _object_tokens(recommendation.object_ref)
+    right = _object_tokens(object_ref)
+    if left & right:
+        return True
+    payload = _json_loads_dict(recommendation.content_json)
+    name = str(payload.get("object_name") or "").strip().lower()
+    if name and (name in str(object_ref or "").lower() or name in str(recommendation.object_ref or "").lower()):
+        return True
+    return False
+
+
 def find_recent_action_feedback(
     recommendations: Iterable[Recommendation],
     experiments: Iterable[Experiment],
@@ -99,7 +123,9 @@ def find_recent_action_feedback(
     experiment_map = _latest_experiment_map(experiments)
     matched: list[tuple[datetime, Recommendation, Experiment | None, str]] = []
     for recommendation in recommendations:
-        if recommendation.action_type != action_type or recommendation.object_ref != object_ref:
+        if recommendation.action_type != action_type:
+            continue
+        if not _refs_loosely_match(recommendation, object_ref):
             continue
         if not _matches_source(recommendation, source_tag):
             continue
@@ -118,7 +144,27 @@ def find_recent_action_feedback(
         )
 
     if not matched:
-        return None
+        # 退一步：同 action_type 最近一次结果，避免 loop:id 对不上 item:id 时记忆失效
+        for recommendation in recommendations:
+            if recommendation.action_type != action_type:
+                continue
+            if not _matches_source(recommendation, source_tag):
+                continue
+            experiment = experiment_map.get(recommendation.id)
+            result = _feedback_result(recommendation, experiment)
+            if result is None:
+                continue
+            event_at = _as_utc(recommendation.executed_at or recommendation.adopted_at or recommendation.created_at)
+            matched.append(
+                (
+                    event_at or datetime.min.replace(tzinfo=timezone.utc),
+                    recommendation,
+                    experiment,
+                    result,
+                )
+            )
+        if not matched:
+            return None
 
     _event_at, _recommendation, experiment, result = sorted(matched, key=lambda row: row[0], reverse=True)[0]
     lift_pct = getattr(experiment, "lift_pct", None) if experiment is not None else None

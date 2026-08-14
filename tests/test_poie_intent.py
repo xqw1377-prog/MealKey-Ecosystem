@@ -30,7 +30,14 @@ def test_parse_rank_goal():
 
 def test_non_goal_returns_none():
     assert _parse_goal("今天天气怎么样") is None
-    assert handle_user_intent(_session(), "s1", "帮我看看评价") is None
+    assert handle_user_intent(_session(), "s1", "今天天气怎么样") is None
+
+
+def test_review_question_hits_operating_demand():
+    result = handle_user_intent(_session(), "s1", "帮我看看评价")
+    assert result is not None
+    assert result["mode"] == "operating_demand"
+    assert result["demand"]["id"] == 51
 
 
 def test_handle_user_intent_creates_goal_and_thread():

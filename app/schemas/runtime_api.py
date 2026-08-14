@@ -13,6 +13,8 @@ class RuntimeStoreInfo(BaseModel):
     store_id: str
     store_name: str
     runtime_state: RuntimeState
+    operating_phase: str = ""
+    phase_label: str = ""
 
 
 class RuntimeLeftPanel(BaseModel):
@@ -29,6 +31,8 @@ class RuntimeCenterPanel(BaseModel):
     active_thread_id: Optional[str] = None
     guide: dict[str, Any] = Field(default_factory=dict)
     principle: str = ""
+    decision_flow: dict[str, Any] = Field(default_factory=dict)
+    loop: Optional[dict[str, Any]] = None
 
 
 class RuntimeRightPanel(BaseModel):

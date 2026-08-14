@@ -44,6 +44,7 @@ def test_mobile_connect_code_and_confirm_flow() -> None:
     connected_row = next(
         row for row in links_after.json()["links"] if row.get("platform") == "meituan"
     )
+    assert connected_row.get("connector_mode") == "mobile"
     assert connected_row.get("connected_at")
     assert connected_row.get("connected_at") != connected_row.get("last_sync_at") or connected_row.get(
         "last_sync_at"

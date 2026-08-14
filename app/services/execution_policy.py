@@ -17,13 +17,10 @@ from app.models.strategy_memory import StrategyMemoryRecord
 
 logger = logging.getLogger(__name__)
 
-# 系统内可落库 + 可回滚的动作（依赖 execution_plan 的 rollback）
+# 仅允许与平台写回 allowlist 对齐的系统内动作；改价/投流/活动不自动执行
 AUTO_EXECUTABLE_ACTIONS = {
     "change_title",
     "change_main_image",
-    "adjust_price_value",
-    "add_set_meal",
-    "menu_patch",
 }
 
 # trust_level=1 时可自动执行的零风险动作
@@ -61,6 +58,99 @@ def _has_negative_memory(db: Session, store_id: str, action_type: str, object_re
         return False
 
 
+def _has_positive_memory(db: Session, store_id: str, action_type: str, object_ref: str = "") -> dict[str, Any] | None:
+    """查 strategy_memory：同 action_type 的历史 positive 记录。
+
+    返回记忆记录(含 lift_pct / lesson)或 None。
+    这是"系统会不会学习"的核心——上次成功了,这次更敢做。
+    """
+    try:
+        record = db.execute(
+            select(StrategyMemoryRecord)
+            .where(
+                StrategyMemoryRecord.store_id == store_id,
+                StrategyMemoryRecord.action_type == action_type,
+                StrategyMemoryRecord.result == "positive",
+            )
+            .order_by(StrategyMemoryRecord.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if record is None:
+            return None
+        return {
+            "action_type": record.action_type,
+            "result": record.result,
+            "lift_pct": record.lift_pct,
+            "lesson": record.lesson,
+            "reuse_when": record.reuse_when,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _get_memory_boost(
+    db: Session | None, store_id: str, action_type: str, object_ref: str = ""
+) -> dict[str, Any] | None:
+    """综合判断记忆加成:positive 加分,negative 减分。
+
+    返回 None 表示无相关记忆,或 {"positive": {...}} / {"negative": True}
+    """
+    if db is None or not store_id or not action_type:
+        return None
+    neg = _has_negative_memory(db, store_id, action_type, object_ref)
+    if neg:
+        return {"negative": True}
+    pos = _has_positive_memory(db, store_id, action_type, object_ref)
+    if pos:
+        return {"positive": pos}
+    return None
+
+
+def _core_arbitrate(
+    *,
+    action_type: str,
+    risk_level: str,
+    reversibility: str,
+    confidence: float,
+    profit_gate_passed: bool,
+    trust_level: int,
+    is_in_system: bool,
+    negative_memory: bool,
+    positive_memory: dict[str, Any] | None,
+) -> str:
+    if confidence < 0.5:
+        return "OBSERVE"
+    if negative_memory:
+        return "DROP"
+
+    effective_trust = min(3, trust_level + (1 if positive_memory else 0))
+    if effective_trust == 0:
+        return "ASK_APPROVAL"
+    if effective_trust >= 1 and action_type in ZERO_RISK_ACTIONS and is_in_system:
+        return "AUTO_AND_REPORT"
+    if positive_memory and is_in_system and action_type in AUTO_EXECUTABLE_ACTIONS:
+        return "AUTO_AND_REPORT"
+    if (
+        effective_trust >= 2
+        and risk_level == "low"
+        and reversibility == "easy"
+        and confidence >= 0.8
+        and profit_gate_passed
+        and is_in_system
+        and action_type in AUTO_EXECUTABLE_ACTIONS
+    ):
+        return "AUTO_AND_REPORT"
+    if (
+        effective_trust >= 3
+        and risk_level in ("low", "medium")
+        and reversibility in ("easy", "medium")
+        and confidence >= 0.75
+        and profit_gate_passed
+    ):
+        return "AUTO_AND_REPORT"
+    return "ASK_APPROVAL"
+
+
 def arbitrate_execution_mode(
     *,
     action_type: str,
@@ -76,49 +166,54 @@ def arbitrate_execution_mode(
 ) -> str:
     """决定执行模式：AUTO / AUTO_AND_REPORT / ASK_APPROVAL / OBSERVE / DROP。
 
-    返回值对应 ODO execution_mode 六档（不含 ASK_INFORMATION，那个由 Ask Engine 触发）。
+    记忆复用：negative → DROP；positive → 降低门槛。
+    若有记忆时的判断与无记忆不同，记一条 Memory-Changed Decision。
     """
-    # 1. 置信度太低 → 观察
-    if confidence < 0.5:
-        return "OBSERVE"
-
-    # 2. 查 strategy_memory：同型 negative → 降级
+    negative_memory = False
+    positive_memory: dict[str, Any] | None = None
     if db is not None and store_id and action_type:
-        if _has_negative_memory(db, store_id, action_type, object_ref):
-            return "DROP"
+        negative_memory = _has_negative_memory(db, store_id, action_type, object_ref)
+        if not negative_memory:
+            positive_memory = _has_positive_memory(db, store_id, action_type, object_ref)
 
-    # 3. trust_level=0：全部问老板
-    if trust_level == 0:
-        return "ASK_APPROVAL"
+    naive = _core_arbitrate(
+        action_type=action_type,
+        risk_level=risk_level,
+        reversibility=reversibility,
+        confidence=confidence,
+        profit_gate_passed=profit_gate_passed,
+        trust_level=trust_level,
+        is_in_system=is_in_system,
+        negative_memory=False,
+        positive_memory=None,
+    )
+    learned = _core_arbitrate(
+        action_type=action_type,
+        risk_level=risk_level,
+        reversibility=reversibility,
+        confidence=confidence,
+        profit_gate_passed=profit_gate_passed,
+        trust_level=trust_level,
+        is_in_system=is_in_system,
+        negative_memory=negative_memory,
+        positive_memory=positive_memory,
+    )
+    if db is not None and store_id and naive != learned:
+        try:
+            from app.services.strategy_memory import record_memory_changed_decision
 
-    # 4. trust_level >= 1：零风险动作自动
-    if trust_level >= 1 and action_type in ZERO_RISK_ACTIONS and is_in_system:
-        return "AUTO_AND_REPORT"
-
-    # 5. trust_level >= 2：低风险可回滚 + 利润门禁通过 → 自动
-    if (
-        trust_level >= 2
-        and risk_level == "low"
-        and reversibility == "easy"
-        and confidence >= 0.8
-        and profit_gate_passed
-        and is_in_system
-        and action_type in AUTO_EXECUTABLE_ACTIONS
-    ):
-        return "AUTO_AND_REPORT"
-
-    # 6. trust_level >= 3：中风险也可自动（但有条件）
-    if (
-        trust_level >= 3
-        and risk_level in ("low", "medium")
-        and reversibility in ("easy", "medium")
-        and confidence >= 0.75
-        and profit_gate_passed
-    ):
-        return "AUTO_AND_REPORT"
-
-    # 7. 默认：问老板
-    return "ASK_APPROVAL"
+            record_memory_changed_decision(
+                db,
+                store_id=store_id,
+                action_type=action_type,
+                naive_mode=naive,
+                learned_mode=learned,
+                cause="negative_drop" if negative_memory else "positive_boost",
+                memory_result="negative" if negative_memory else "positive",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("memory-changed decision not recorded for %s", action_type)
+    return learned
 
 
 # ---------------------------------------------------------------------------

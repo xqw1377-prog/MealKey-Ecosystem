@@ -33,10 +33,11 @@ class PlatformConnection(IdMixin, TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="pending")
     external_store_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    connector_mode: Mapped[str] = mapped_column(String(32), default="mock")  # mock | http | mobile
+    connector_mode: Mapped[str] = mapped_column(String(32), default="mock")  # mock | http | mobile | oauth
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    auth_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 

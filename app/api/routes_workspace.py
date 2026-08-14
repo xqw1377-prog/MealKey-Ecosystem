@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -9,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.routes_dev import seed_demo
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.entities import ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, Merchant, ShopFunnelDaily, Store
 from app.models.intake import IntakeRawAsset, IntakeSubmission
@@ -23,6 +25,7 @@ from app.services.document_alignment import build_document_alignment, preview_do
 from app.services.store_state import build_store_state
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _store_query():
@@ -1333,8 +1336,17 @@ def preview_intake(payload: IntakePreviewRequest):
 def submit_intake(payload: IntakeSubmitRequest, db: Session = Depends(get_db)):
     readiness = _estimate_intake_readiness(payload)
     store = _create_store_from_intake(db, payload, readiness)
+    if payload.referral_artifact_id:
+        from app.services.commercial.growth import attach_referral_store
+
+        attach_referral_store(db, artifact_id=payload.referral_artifact_id, to_store_id=store.id)
     db.commit()
     db.refresh(store)
+    if settings.is_dev:
+        from app.services.test_store_access import open_test_store_access
+
+        open_test_store_access(db, store)
+        db.refresh(store)
     dashboard = _build_dashboard_payload(db=db, store=store, days=7)
     return {
         "store_id": store.id,
@@ -1374,6 +1386,10 @@ def bootstrap_workspace(db: Session = Depends(get_db)):
         payload = seed_demo(db)
         stores = db.execute(stmt).scalars().all()
         created = True
+        if stores:
+            from app.services.test_store_access import open_test_store_access
+
+            open_test_store_access(db, stores[0])
     default_store = stores[0] if stores else None
     return {
         "created": created,
@@ -1408,8 +1424,8 @@ def read_store_notification(notification_id: str, db: Session = Depends(get_db))
 
 @router.post("/platforms/oauth/{platform}/start")
 def start_platform_oauth(platform: str, store_id: str = Query(default="")):
-    """平台 OAuth 入口：未配置时明确 501，避免空骨架假装可用。"""
-    from app.services.platform_oauth import get_oauth_url, is_oauth_configured
+    """平台 OAuth 入口。"""
+    from app.services.platform_oauth import build_oauth_state, get_oauth_url, is_oauth_configured
 
     key = (platform or "").strip().lower()
     if key not in {"meituan", "eleme"}:
@@ -1419,10 +1435,61 @@ def start_platform_oauth(platform: str, store_id: str = Query(default="")):
             status_code=501,
             detail="OAuth not configured for this platform; use connect-code flow instead",
         )
-    url = get_oauth_url(key, state=store_id or key)
+    state = build_oauth_state(key, store_id=store_id)
+    url = get_oauth_url(key, state=state)
     if not url:
         raise HTTPException(status_code=501, detail="OAuth URL unavailable")
-    return {"ok": True, "platform": key, "oauth_url": url}
+    return {"ok": True, "platform": key, "oauth_url": url, "state": state}
+
+
+@router.get("/platforms/oauth/{platform}/callback")
+def platform_oauth_callback(
+    platform: str,
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    db: Session = Depends(get_db),
+):
+    from app.services.platform_oauth import (
+        exchange_code_for_token,
+        oauth_connected_message,
+        parse_oauth_state,
+        persist_oauth_connection,
+    )
+
+    key = (platform or "").strip().lower()
+    if key not in {"meituan", "eleme"}:
+        raise HTTPException(status_code=400, detail="unsupported platform")
+    if not code.strip():
+        raise HTTPException(status_code=400, detail="missing code")
+    parsed = parse_oauth_state(state)
+    store_id = str(parsed.get("store_id") or "").strip()
+    if not store_id:
+        raise HTTPException(status_code=400, detail="missing store_id in state")
+    store = _load_store(db, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="store not found")
+    try:
+        token_payload = exchange_code_for_token(key, code.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if not token_payload:
+        raise HTTPException(status_code=502, detail="oauth exchange failed")
+    row = persist_oauth_connection(db, store_id=store_id, platform=key, token_payload=token_payload)
+    db.commit()
+    db.refresh(row)
+    return {
+        "ok": True,
+        "store_id": store_id,
+        "platform": key,
+        "message": oauth_connected_message(key, row),
+        "link": {
+            "platform": row.platform,
+            "status": row.status,
+            "connector_mode": row.connector_mode,
+            "external_store_id": row.external_store_id,
+            "auth_expires_at": row.auth_expires_at.isoformat() if row.auth_expires_at else None,
+        },
+    }
 
 
 @router.get("/stores/{store_id}/dashboard")
@@ -1431,10 +1498,13 @@ def get_store_dashboard(
     days: int = Query(default=7, ge=1),
     db: Session = Depends(get_db),
 ):
+    from app.services.llm_engine.request_budget import homepage_read_scope
+
     store = _load_store(db, store_id)
     if store is None:
         raise HTTPException(status_code=404, detail="store not found")
-    return _build_dashboard_payload(db=db, store=store, days=days)
+    with homepage_read_scope():
+        return _build_dashboard_payload(db=db, store=store, days=days)
 
 
 @router.get("/stores/{store_id}/document-alignment")
@@ -1482,6 +1552,7 @@ def ask_store_manager(
         shortcut_question=payload.question,
         days=payload.days,
         use_shortcuts=True,
+        work_thread_id=payload.work_thread_id,
     )
     return _attach_runtime_context(store_id, db, result)
 
@@ -1491,6 +1562,7 @@ async def ask_store_manager_rich(
     store_id: str,
     question: str = Form(default=""),
     days: int = Form(default=7),
+    work_thread_id: str = Form(default=""),
     files: list[UploadFile] = File(default_factory=list),
     db: Session = Depends(get_db),
 ):
@@ -1504,8 +1576,19 @@ async def ask_store_manager_rich(
     attachment_context = build_attachment_context(parsed_files)
     if parsed_files:
         from app.services.mue.engine import ingest_attachment_knowledge
+        from app.services.loop_ingest import ingest_operating_attachments
 
         ingest_attachment_knowledge(db, store_id, parsed_files)
+        try:
+            ingest_operating_attachments(db, store_id, parsed_files)
+        except Exception:
+            logger.exception("operating ingest failed for store %s", store_id)
+        try:
+            from app.services.metrics_ingest import ingest_funnel_from_attachments
+
+            ingest_funnel_from_attachments(db, store_id, parsed_files)
+        except Exception:
+            logger.exception("funnel ingest failed for store %s", store_id)
     base_question = (question or "").strip() or "请先帮我读取这些附件，提炼重点，再告诉我接下来该怎么处理。"
     enriched_question = base_question if not attachment_context else f"{base_question}\n\n{attachment_context}"
     result = _route_answer_store_manager(
@@ -1515,6 +1598,7 @@ async def ask_store_manager_rich(
         shortcut_question=base_question,
         days=max(1, int(days or 7)),
         use_shortcuts=True,
+        work_thread_id=work_thread_id or None,
     )
     result["attachments"] = [item.to_public_dict() for item in parsed_files]
     return _attach_runtime_context(store_id, db, result)
@@ -1561,6 +1645,27 @@ def read_file_by_path(
     return _attach_runtime_context(store_id, db, result)
 
 
+def _work_thread_question(question: str, db: Session, store_id: str, work_thread_id: str | None = None) -> str:
+    hint_id = str(work_thread_id or "").strip()
+    if not hint_id:
+        return question
+    loop = None
+    try:
+        from app.services.closed_loop import get_loop
+
+        loop = get_loop(db, store_id, hint_id)
+    except Exception:
+        loop = None
+    if loop is not None and loop.title:
+        return f"当前继续同一经营事项「{loop.title}」。\n{question}"
+    from app.models.thread import OperatingThread
+
+    thread = db.get(OperatingThread, hint_id)
+    if thread is not None and thread.store_id == store_id and thread.title:
+        return f"当前继续同一经营线程「{thread.title}」。\n{question}"
+    return question
+
+
 def _route_answer_store_manager(
     *,
     db: Session,
@@ -1569,9 +1674,11 @@ def _route_answer_store_manager(
     shortcut_question: str | None = None,
     days: int,
     use_shortcuts: bool,
+    work_thread_id: str | None = None,
 ) -> dict[str, Any]:
     from app.services.ai_assist import answer_assist_question
 
+    scoped_question = _work_thread_question(question, db, store_id, work_thread_id)
     shortcut_input = (shortcut_question or question or "").strip()
 
     # 第一道：产品引导类问题（部署/平台/设置/装修入口）由 ai_assist 拦截
@@ -1597,7 +1704,10 @@ def _route_answer_store_manager(
     # 第三道：经营类问题交给 chief_agent（ReAct 调度专业 agent）
     from app.services.chief_agent import answer_as_chief
 
-    return answer_as_chief(db, store_id, question, days=days).model_dump(mode="json")
+    result = answer_as_chief(db, store_id, scoped_question, days=days).model_dump(mode="json")
+    if work_thread_id:
+        result["work_thread_id"] = work_thread_id
+    return result
 
 
 def _attach_runtime_context(store_id: str, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1636,6 +1746,7 @@ def _ensure_experiment(db: Session, rec: Recommendation) -> Experiment:
     experiment = Experiment(
         recommendation_id=rec.id,
         store_id=rec.store_id,
+        work_thread_id=rec.work_thread_id,
         item_id=rec.object_ref.split(":", 1)[1] if rec.object_ref.startswith("item:") else None,
         baseline_value=metric.observed_value if metric else None,
         observed_value=None,
@@ -1837,6 +1948,7 @@ def get_today_agenda(
     """WP4a: 今日决策流时间线——节律 + 已跑 phase + 未读通知。"""
     from zoneinfo import ZoneInfo
 
+    from app.services.decision_flow import PHASE_META, resolve_operating_phase
     from app.services.operating_rhythm import is_in_quiet_hours, resolve_store_rhythm
 
     store = _load_store(db, store_id)
@@ -1847,6 +1959,8 @@ def get_today_agenda(
     day = now.strftime("%Y-%m-%d")
     hour = now.hour
     rhythm = resolve_store_rhythm(db, store_id)
+    current_phase = resolve_operating_phase(rhythm, hour=hour)
+    phase_meta = PHASE_META.get(current_phase) or {}
 
     # 节律驱动的计划时刻
     def _h(t: str) -> int:
@@ -1878,9 +1992,11 @@ def get_today_agenda(
         marker = f"clock_run:{store_id}:{day}:{phase}"
         if marker in ran:
             return "done"
-        if at_hour == hour:
+        if phase == current_phase or (
+            phase == "dinner_protect" and current_phase == "lunch_protect" and hour >= dinner_start
+        ):
             return "now"
-        if at_hour < hour:
+        if at_hour < hour and phase != current_phase:
             return "missed"
         return "upcoming"
 
@@ -1914,6 +2030,11 @@ def get_today_agenda(
     return {
         "date": day,
         "hour": hour,
+        "current_phase": current_phase,
+        "phase_label": phase_meta.get("label") or current_phase,
+        "clock_why": phase_meta.get("clock_why") or "",
+        "interrupt_ok": bool(phase_meta.get("interrupt_ok")),
+        "protect_mode": bool(phase_meta.get("protect")),
         "rhythm_source": rhythm.source,
         "quiet_hours": rhythm.quiet_hours,
         "phases": phases,
@@ -1974,6 +2095,7 @@ def list_platform_links(store_id: str, db: Session = Depends(get_db)):
                 "external_store_id": row.external_store_id,
                 "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
                 "connected_at": row.connected_at.isoformat() if row.connected_at else None,
+                "auth_expires_at": row.auth_expires_at.isoformat() if row.auth_expires_at else None,
             }
             for row in rows
         ],

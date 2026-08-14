@@ -38,6 +38,8 @@ class MatrixAgentInput:
     experiments: list[Any] = field(default_factory=list)
     # 真实 CRM 用户数据是否可用（P1-2：CRM 降级用）
     has_real_crm_data: bool = False
+    # 无真实投流数据时 Ads Agent fail-closed，禁止把加投当实战
+    ads_observed: bool = False
 
 
 MATRIX_ACTION_TYPES: dict[str, set[str]] = {

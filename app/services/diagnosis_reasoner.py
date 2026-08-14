@@ -17,6 +17,7 @@ import os
 from typing import Any, Optional
 
 from app.services.llm_engine.gateway import call_llm, is_llm_configured
+from app.services.llm_engine.request_budget import is_homepage_read
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,11 @@ logger = logging.getLogger(__name__)
 def _diagnosis_llm_enabled() -> bool:
     """LLM 诊断推理器开关。
 
-    默认关闭（"0"）：diagnosis_reasoner 直接回退到规则模板。
-    显式设置 MEALKY_DIAGNOSIS_LLM=1 后才会真正调用 LLM 推理。
+    默认开启（"1"）：diagnosis_reasoner 使用 LLM 做多因子根因推理。
+    单因子规则模板只作为 LLM 不可用时的降级。
+    设 MEALKY_DIAGNOSIS_LLM=0 可关闭(测试环境)。
     """
-    return os.getenv("MEALKY_DIAGNOSIS_LLM", "0").strip() in {"1", "true", "yes", "on"}
+    return os.getenv("MEALKY_DIAGNOSIS_LLM", "1").strip() in {"1", "true", "yes", "on"}
 
 
 def _build_diagnosis_context(
@@ -107,7 +109,7 @@ def llm_diagnose_root_cause(
     # 规则模板降级
     rule_result = _rule_diagnose(metric, delta_pct, fallback_root_cause, fallback_funnel_stage)
 
-    if not _diagnosis_llm_enabled() or not is_llm_configured("general.consulting"):
+    if is_homepage_read() or not _diagnosis_llm_enabled() or not is_llm_configured("general.consulting"):
         return {**rule_result, "source": "rule_fallback"}
 
     context = _build_diagnosis_context(
@@ -124,12 +126,16 @@ def llm_diagnose_root_cause(
 
     system = (
         "你是 MealKey AI 店长的诊断引擎。你的任务是根据经营数据推理根因。\n"
-        "规则引擎已经检测到信号（如 CTR 下降），但根因需要你结合上下文推理。\n"
-        "要求：\n"
-        "1. 给出最可能的根因（primary），列出 1-2 个竞争性假说（alternatives）\n"
-        "2. 每个判断要有证据支撑\n"
-        "3. 给出 1-2 个候选动作（单变量测试原则）\n"
-        "4. 只输出 JSON，不要 Markdown\n"
+        "规则引擎已经检测到信号（如 CTR 下降），但根因需要你结合上下文推理。\n\n"
+        "多因子诊断要求（不可偷懒归因天气/随机波动）：\n"
+        "1. 必须检查的因子：曝光量趋势、CTR(点击率)、CVR(转化率)、客单价变化、"
+        "是否有活动在跑(活动是否到期/叠加)、竞品最近动作(换图/降价/新活动)、"
+        "近期差评主题(口味/份量/速度/包装)、退款率\n"
+        "2. 排除法：如果某因子没数据，标注 'insufficient_data'，不要猜\n"
+        "3. 给出最可能的根因（primary），列出 1-2 个竞争性假说（alternatives）\n"
+        "4. 每个判断要有证据支撑（引用上下文里的具体数字）\n"
+        "5. 给出 1-2 个候选动作（单变量测试原则，一次只改一个变量）\n"
+        "6. 只输出 JSON，不要 Markdown\n"
         "输出格式：\n"
         '{"root_cause":"","funnel_stage":"","competing_causes":[],"evidence":[],"confidence":0.0,"candidate_actions":[{"action":"","primary_variable":"","risk":""}]}'
     )
@@ -143,6 +149,7 @@ def llm_diagnose_root_cause(
             ],
             temperature=0.3,
             max_tokens=800,
+            timeout_seconds=12,
         )
         if not result.ok or not result.content:
             return {**rule_result, "source": "rule_fallback", "llm_error": result.reason}
@@ -198,7 +205,7 @@ def llm_diagnose_product_issue(
     例如：不只是"CTR 下降 → 换主图"，
     而是"CTR 下降 15%，但竞品 2 家也换了图，且你的评分稳定 → 判断为主图竞争力相对下降，建议强调份量感"。
     """
-    if not _diagnosis_llm_enabled() or not is_llm_configured("general.consulting"):
+    if is_homepage_read() or not _diagnosis_llm_enabled() or not is_llm_configured("general.consulting"):
         return _rule_product_diagnose(ctr_delta, cvr_delta, item_name)
 
     context = {
@@ -236,6 +243,7 @@ def llm_diagnose_product_issue(
             ],
             temperature=0.3,
             max_tokens=600,
+            timeout_seconds=12,
         )
         if not result.ok or not result.content:
             return _rule_product_diagnose(ctr_delta, cvr_delta, item_name)

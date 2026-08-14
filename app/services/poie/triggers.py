@@ -24,20 +24,46 @@ def _hour_local() -> int:
 def trigger_time(
     brief: ManagerHomeBrief,
     agents: StoreAgentsResponse | None,
+    *,
+    db: Session | None = None,
+    store_id: str = "",
+    hour: int | None = None,
 ) -> list[CandidateAction]:
-    """Time × State → Next Best Action（不是 cron 提醒）。"""
-    hour = _hour_local()
+    """Time × State → Next Best Action（不是 cron 提醒）。
+
+    窗口按门店节律走：高峰前才推拍板，高峰/静默不推增长。
+    """
+    hour = hour if hour is not None else _hour_local()
+    phase = None
+    quiet = False
+    if db is not None and store_id:
+        try:
+            from app.services.operating_rhythm import is_in_quiet_hours, match_phase, resolve_store_rhythm
+            from app.services.decision_flow import resolve_operating_phase
+
+            rhythm = resolve_store_rhythm(db, store_id)
+            quiet = is_in_quiet_hours(rhythm, hour)
+            phase = resolve_operating_phase(rhythm, hour=hour) or match_phase(hour, rhythm)
+        except Exception:  # noqa: BLE001
+            phase = None
+    if quiet or phase in {"quiet", "lunch_protect", "night_learn"}:
+        return []
+
     growth = agents.growth if agents else None
     primary = brief.primary_experiment
+    pre_peak = phase in {"lunch_nba", "morning_readiness", "dinner_strategy"} or (
+        phase is None and 10 <= hour <= 11
+    )
+    evening = phase in {"evening_review"} or (phase is None and hour >= 21)
     # 午餐前窗口：有主实验/今日优先且状态待确认
-    if 10 <= hour <= 11 and primary and (primary.status or "proposed") in {"proposed", "adopted", ""}:
+    if pre_peak and primary and (primary.status or "proposed") in {"proposed", "adopted", ""}:
         return [
             CandidateAction(
                 id=f"time:lunch:{primary.title}",
                 title=primary.title,
                 trigger="time",
-                insight=growth.reason if growth else "临近午高峰，今天值得提前做主动作。",
-                why_now=f"当前 {hour}:00 临近午高峰，结合今日经营状态，这是最佳拍板窗口。",
+                insight=growth.reason if growth else "临近高峰，今天值得提前做主动作。",
+                why_now=f"当前 {hour}:00 临近高峰，结合今日经营状态，这是最佳拍板窗口。",
                 already_did="已核对库存/活动/主推状态，并准备好可执行方案。",
                 success_metric=primary.expected_metric or "核心指标达标",
                 interrupt_reason="time",
@@ -53,7 +79,7 @@ def trigger_time(
             )
         ]
     # 晚间：偏结果复盘，不主动新开动作
-    if hour >= 21 and growth and growth.today_priority:
+    if evening and growth and growth.today_priority:
         return [
             CandidateAction(
                 id="time:evening-hold",
@@ -466,6 +492,215 @@ def trigger_onboarding(
     ]
 
 
+def trigger_decision_skills(
+    agents: StoreAgentsResponse | None,
+    strategy_memory: StrategyMemorySnapshot | None = None,
+) -> list[CandidateAction]:
+    """Profit / Campaign 作为内部技能进入仲裁，不出现四个前台入口。"""
+    if agents is None:
+        return []
+    try:
+        from app.services.action_ranker import apply_memory_to_scores
+        from app.services.decision_skills import collect_decision_skill_candidates
+
+        candidates = collect_decision_skill_candidates(agents.store_state)
+        if not candidates or strategy_memory is None:
+            return candidates
+        scored = apply_memory_to_scores(
+            [
+                {
+                    "action_type": "change_main_image" if "主图" in item.title else "change_title" if "标题" in item.title else "ops_hint",
+                    "score": min(1.0, (item.score.priority or 0) / 100.0),
+                    "candidate": item,
+                }
+                for item in candidates
+            ],
+            strategy_memory,
+        )
+        out: list[CandidateAction] = []
+        for row in scored:
+            item = row["candidate"]
+            item.score.priority = round(float(row["score"]) * 100.0, 2)
+            out.append(item)
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def trigger_bad_reviews(
+    brief: ManagerHomeBrief,
+    *,
+    db: Session | None = None,
+    store_id: str = "",
+) -> list[CandidateAction]:
+    """差评闭环:检测到差评率上升 → 自动生成回复/改进候选。
+
+    补足竞品(评价/IM)短板:让 MealKey 主动发现差评,而不是等老板去看。
+    """
+    if db is None or not store_id:
+        return []
+
+    # 从 StoreState 的 FeedbackInfo 读取差评信号
+    feedback = None
+    try:
+        if brief and hasattr(brief, "feedback_keywords"):
+            feedback = brief
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 直接查 ReviewFact 获取差评数据(更可靠)
+    try:
+        from datetime import timedelta
+        from app.core.time import utc_now
+        from app.models.entities import ReviewFact
+
+        cutoff = utc_now() - timedelta(days=30)
+        recent = list(
+            db.execute(
+                __import__("sqlalchemy").select(ReviewFact)
+                .where(ReviewFact.store_id == store_id, ReviewFact.reviewed_at >= cutoff)
+                .order_by(ReviewFact.reviewed_at.desc())
+                .limit(50)
+            ).scalars()
+        )
+    except Exception:  # noqa: BLE001
+        return []
+
+    if not recent:
+        return []
+
+    bad_reviews = [r for r in recent if r.rating is not None and float(r.rating) <= 3.0]
+    bad_rate = len(bad_reviews) / len(recent) if recent else 0
+
+    # 差评率 > 15% 且至少 2 条 → 触发
+    if bad_rate < 0.15 or len(bad_reviews) < 2:
+        return []
+
+    # 分析差评主题
+    themes: list[str] = []
+    for r in bad_reviews[:10]:
+        content = (r.content or "").lower()
+        if any(kw in content for kw in ["味", "咸", "淡", "难吃", "不好吃"]):
+            themes.append("口味")
+        if any(kw in content for kw in ["少", "小", "不够", "没吃饱"]):
+            themes.append("份量")
+        if any(kw in content for kw in ["慢", "等", "久", "凉"]):
+            themes.append("出餐速度")
+        if any(kw in content for kw in ["洒", "漏", "破", "压"]):
+            themes.append("包装")
+    # 去重取前 2 个主题
+    seen = set()
+    top_themes = [t for t in themes if not (t in seen or seen.add(t))][:2]
+    theme_text = "、".join(top_themes) if top_themes else "综合体验"
+
+    sample = bad_reviews[0]
+    sample_text = (sample.content or "")[:60] if sample.content else ""
+
+    return [
+        CandidateAction(
+            id=f"bad_reviews_{store_id}",
+            title=f"近 30 天差评率 {bad_rate:.0%},主要问题:{theme_text}",
+            trigger="anomaly",
+            insight=(
+                f"近 30 天共 {len(recent)} 条评价,其中 {len(bad_reviews)} 条差评(1-3星)。"
+                f"主要问题集中在{theme_text}。"
+                + (f"例如:「{sample_text}」" if sample_text else "")
+            ),
+            why_now="差评直接影响店铺评分和排名,且会降低新客转化率。建议尽快回复并改进。",
+            already_did=f"已自动检测到 {len(bad_reviews)} 条差评,分析了主要问题方向。",
+            success_metric="差评率降至 10% 以下,回复率 > 80%",
+            interrupt_reason="anomaly",
+            suggested_state="confirm",
+            score=score_candidate(
+                business_impact=0.8,
+                urgency=0.7,
+                confidence=0.9,
+                need_for_human=0.8,
+                goal_relevance=0.7,
+                interruption_cost=0.4,
+            ),
+        )
+    ]
+
+
+def trigger_missing_cost(
+    brief: ManagerHomeBrief,
+    *,
+    db: Session | None = None,
+    store_id: str = "",
+) -> list[CandidateAction]:
+    """Track B: 成本数据缺失 → 生成 [填写成本] / [上传成本表] 候选。
+
+    UNKNOWN 是一等状态:当利润计算缺少食材/包装成本时,
+    系统不应假装能算准,而应主动提示老板补充。
+    """
+    if db is None or not store_id:
+        return []
+
+    profit = None
+    try:
+        if brief and brief.profit_summary:
+            profit = brief.profit_summary
+    except Exception:  # noqa: BLE001
+        return []
+
+    if not profit:
+        return []
+
+    # 只在 proxy 模式下提示(observed 模式说明已有真实成本)
+    if profit.data_quality != "proxy":
+        return []
+
+    missing = profit.missing_blocks or []
+    has_cost_missing = "food_cost" in missing or "packaging_cost" in missing
+    if not has_cost_missing:
+        return []
+
+    # 查成本覆盖度
+    try:
+        from app.services.cost_import import get_store_cost_coverage
+
+        coverage = get_store_cost_coverage(db, store_id)
+    except Exception:  # noqa: BLE001
+        coverage = {"total_items": 0, "missing_cost": 0, "coverage_pct": 0.0}
+
+    total = coverage.get("total_items", 0)
+    missing_count = coverage.get("missing_cost", 0)
+    pct = coverage.get("coverage_pct", 0.0)
+
+    # 如果没有菜单商品,不提示(门店还没导入菜单)
+    if total == 0:
+        return []
+
+    title = "上传成本表，让利润计算变准"
+    insight = (
+        f"当前 {total} 个商品中还有 {missing_count} 个缺成本数据，"
+        f"利润计算仍在用代理估算（偏高）。上传成本表后会自动匹配。"
+    )
+
+    return [
+        CandidateAction(
+            id=f"missing_cost_{store_id}",
+            title=title,
+            trigger="understanding",
+            insight=insight,
+            why_now="没有真实成本，活动测算和利润诊断都不准，可能导致错误决策。",
+            already_did=f"已自动从平台读取 GMV/订单/佣金等数据，只缺食材/包装成本。",
+            success_metric="成本覆盖率 > 80% 后利润计算自动切换为真实模式",
+            interrupt_reason="understanding",
+            suggested_state="need_input",
+            score=score_candidate(
+                business_impact=0.8,
+                urgency=0.6,
+                confidence=0.95,
+                need_for_human=0.9,
+                goal_relevance=0.8,
+                interruption_cost=0.4,
+            ),
+        )
+    ]
+
+
 def collect_candidates(
     brief: ManagerHomeBrief,
     *,
@@ -479,10 +714,80 @@ def collect_candidates(
     candidates: list[CandidateAction] = []
     candidates.extend(trigger_onboarding(db, store_id, agents))  # connect 阶段优先
     candidates.extend(trigger_understanding(db, store_id, agents))
-    candidates.extend(trigger_time(brief, agents))
+    candidates.extend(trigger_missing_cost(brief, db=db, store_id=store_id))
+    candidates.extend(trigger_bad_reviews(brief, db=db, store_id=store_id))
+    candidates.extend(trigger_time(brief, agents, db=db, store_id=store_id))
     candidates.extend(trigger_anomaly(events))
     candidates.extend(trigger_history(db, store_id))
     candidates.extend(trigger_opportunity(db, store_id, agents, brief))
     candidates.extend(trigger_goal(db, store_id))
     candidates.extend(trigger_result(strategy_memory))
+    candidates.extend(trigger_decision_skills(agents, strategy_memory))
+
+    # Gap4 修复:对所有候选统一应用记忆加成(不只是 decision_skills)
+    # 上次换图成功了 → 这次"换主图"候选获得更高优先级
+    candidates = _apply_memory_boost(candidates, strategy_memory)
+
+    return candidates
+
+
+# 候选标题 → action_type 映射(用于记忆加成)
+_TITLE_ACTION_MAP = {
+    "主图": "change_main_image",
+    "换图": "change_main_image",
+    "标题": "change_title",
+    "改价": "adjust_price_value",
+    "降价": "adjust_price_value",
+    "套餐": "add_set_meal",
+    "广告": "adjust_ads_budget",
+    "投流": "adjust_ads_budget",
+    "满减": "adjust_promo",
+    "评价": "batch_reply_negative_reviews",
+    "差评": "batch_reply_negative_reviews",
+}
+
+
+def _infer_action_type_from_title(title: str) -> str:
+    """从候选标题推断 action_type(用于记忆加成匹配)。"""
+    for keyword, action_type in _TITLE_ACTION_MAP.items():
+        if keyword in title:
+            return action_type
+    return ""
+
+
+def _apply_memory_boost(
+    candidates: list[CandidateAction],
+    memory: StrategyMemorySnapshot | None,
+) -> list[CandidateAction]:
+    """对所有候选应用记忆加成:上次成功的动作 → 优先级提升。
+
+    这是 Gap4 的另一半:不仅 execution_policy 会 BOOST,
+    POIE 候选排序也会 BOOST → 更可能进入"需要你"队列。
+    """
+    if not memory or not memory.items or not candidates:
+        return candidates
+
+    try:
+        from app.services.action_ranker import memory_delta_for_action
+    except Exception:  # noqa: BLE001
+        return candidates
+
+    for cand in candidates:
+        # 从 Action 子对象或标题推断 action_type
+        action_type = ""
+        if cand.action and cand.action.action_type:
+            action_type = cand.action.action_type
+        elif cand.title:
+            action_type = _infer_action_type_from_title(cand.title)
+
+        if not action_type:
+            continue
+
+        delta = memory_delta_for_action(action_type, memory)
+        if delta != 0.0:
+            # delta 是 0-1 尺度的增量, priority 是 0-100 尺度
+            old_priority = cand.score.priority or 0.0
+            new_priority = max(0.0, min(100.0, old_priority + delta * 30.0))
+            cand.score.priority = round(new_priority, 2)
+
     return candidates

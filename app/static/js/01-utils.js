@@ -378,12 +378,18 @@ function humanizeDecisionTitle(raw) {
   const replacements = [
     ["baseline_window", "基线期"],
     ["benchmark_window", "对照期"],
+    ["delta_pct", "变化"],
+    ["impressions", "曝光"],
+    ["CTR", "点击率"],
+    ["ctr", "点击率"],
+    ["CVR", "转化率"],
+    ["cvr", "转化率"],
+    ["GMV", "营业额"],
+    ["gmv", "营业额"],
+    ["SKU", "商品"],
+    ["sku", "商品"],
     ["benchmark", "对照"],
     ["orders", "订单"],
-    ["gmv", "营业额"],
-    ["ctr", "点击率"],
-    ["cvr", "转化率"],
-    ["impressions", "曝光"],
     ["visits", "进店"],
   ];
   let result = text;

@@ -34,7 +34,13 @@ def candidate_to_card(candidate: CandidateAction) -> DecisionCard | None:
 
     actions: list[DecisionAction] = []
     if bucket == "need_you":
-        if state == "need_input" or candidate.trigger == "understanding":
+        # 成本上传卡片:特殊处理,给一个直接上传的 action
+        if "missing_cost" in candidate.id:
+            actions = [
+                DecisionAction(label="上传成本表", kind="upload_cost", class_name="primary"),
+                DecisionAction(label="稍后再说", kind="focus_intent", class_name="ghost"),
+            ]
+        elif state == "need_input" or candidate.trigger == "understanding":
             actions = [
                 DecisionAction(label="在下方告诉我", kind="focus_intent", class_name="primary"),
                 DecisionAction(label="稍后再说", kind="focus_intent", class_name="ghost"),

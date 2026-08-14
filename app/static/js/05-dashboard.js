@@ -1128,10 +1128,61 @@ function renderCollectionCenter() {
         .join("")
     : `<div class="empty-state">至少完成两次快照后，系统会在这里展示菜品变化。</div>`;
 
+  renderPlatformIntelPanel();
+
   const providerText = configuredProviders.length
     ? `服务端已配置：${configuredProviders.join(" / ")}`
     : "服务端尚未配置自动采集源";
   qs("#collectionLiveStatus").title = providerText;
+}
+
+function renderPlatformIntelPanel() {
+  const intel = state.platformIntel || {};
+  const items = intel.items || [];
+  const lastRun = intel.last_run;
+  const schedule = intel.schedule || state.publicConfig?.platform_intel?.schedule || "07:45";
+  const countEl = qs("#platformIntelCount");
+  const statusEl = qs("#platformIntelRunStatus");
+  const listEl = qs("#platformIntelList");
+  if (!countEl || !statusEl || !listEl) return;
+  countEl.textContent = `${items.length} 条`;
+  const kindLabel = { promo: "促销", policy: "政策", news: "新闻" };
+  if (lastRun) {
+    const runOk = lastRun.status === "completed" || lastRun.status === "completed_with_errors";
+    statusEl.innerHTML = `
+      <div class="collection-run-row">
+        <span class="run-dot ${runOk ? "" : "failed"}"></span>
+        <div>
+          <div class="collection-row-title">${runOk ? "官网公开页已采集" : "官网采集失败"}</div>
+          <div class="collection-row-meta">${
+            lastRun.error
+              ? escapeHtml(lastRun.error)
+              : `新 ${lastRun.new_count || 0} · 更新 ${lastRun.updated_count || 0} · 每日 ${schedule}`
+          }</div>
+        </div>
+        <div class="collection-row-time">${collectionTime(lastRun.completed_at || lastRun.started_at)}</div>
+      </div>
+    `;
+  } else {
+    statusEl.innerHTML = `<div class="empty-state">还没采过官网。点「采集官网政策与活动」，或等每日 ${schedule} 自动跑。</div>`;
+  }
+  listEl.innerHTML = items.length
+    ? takeTop(items, 8)
+        .map((item) => {
+          const kind = kindLabel[item.kind] || item.kind;
+          return `
+            <div class="collection-change-row">
+              <span class="change-dot"></span>
+              <div>
+                <div class="collection-row-title"><span class="intel-kind ${escapeHtml(item.kind || "news")}">${escapeHtml(kind)}</span>${escapeHtml(item.title || "")}</div>
+                <div class="collection-row-meta">${escapeHtml((item.platform || "") + " · " + (item.summary || item.source_name || item.url || ""))}</div>
+              </div>
+              <div class="collection-row-time">${item.fetched_at ? collectionTime(item.fetched_at) : ""}</div>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">没有公开政策/活动证据。采集失败时不会假装有活动。</div>`;
 }
 
 function renderDailyBoard() {
@@ -1775,6 +1826,15 @@ function renderSettingsOverview() {
 
   const store = overview.store || {};
   const form = qs("#storeSettingsForm");
+  const ops = overview.store_ops || {};
+  const opsForm = qs("#storeOpsForm");
+  if (opsForm) {
+    Array.from(opsForm.elements).forEach((el) => {
+      if (!el.name) return;
+      if (el.name === "task_url") el.value = ops.task_url ? `${location.origin}${ops.task_url}` : "";
+      else if (ops[el.name] !== undefined && ops[el.name] !== null) el.value = ops[el.name];
+    });
+  }
   if (form) {
     Array.from(form.elements).forEach((el) => {
       if (!(el instanceof HTMLInputElement) || !el.name) return;

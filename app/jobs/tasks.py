@@ -61,6 +61,28 @@ def collect_all_store_competitors() -> dict:
         db.close()
 
 
+@celery_app.task(name="platform_intel.collect_official")
+def collect_official_platform_intel() -> dict:
+    from app.services.platform_intel import collect_official_intel
+
+    db = SessionLocal()
+    try:
+        return collect_official_intel(db)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="oci.diff_p0_rules")
+def diff_p0_rule_sources() -> dict:
+    from app.services.oci.fetchers import diff_enabled_rule_sources
+
+    db = SessionLocal()
+    try:
+        return diff_enabled_rule_sources(db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="ops.run_daily_job_all_stores")
 def run_daily_job_all_stores(days: int = 7) -> dict:
     db = SessionLocal()
@@ -157,6 +179,14 @@ def _run_clock_phase(db: Session, store_id: str, phase: str) -> dict:
             "alerts": len(critical),
             "summary": events.summary,
         }
+        try:
+            from app.services.seed_launch import daily_sla_digest, push_daily_sla
+
+            digest = daily_sla_digest(db, store_id)
+            result["daily_sla"] = digest
+            result["daily_sla_pushed"] = bool(push_daily_sla(db, store_id, digest))
+        except Exception as exc:  # noqa: BLE001
+            result["daily_sla_error"] = str(exc)[:80]
     elif phase == "lunch_nba":
         # Growth Readiness 分析链（V1 §08 补全）
         # 检查今日目标/流量/商品/活动/投流/产能/利润/竞争 → 判断值不值得做增长动作
@@ -257,6 +287,22 @@ def _run_clock_phase(db: Session, store_id: str, phase: str) -> dict:
             result["ops_queue_need_you"] = len(poie_result.ops_queue.need_you)
             result["ops_queue_working"] = len(poie_result.ops_queue.working)
             result["ops_queue_results"] = len(poie_result.ops_queue.results)
+            try:
+                from app.services.decision_flow import build_decision_flow
+                from app.services.operating_clock import apply_light_tick
+
+                flow = build_decision_flow(
+                    queue=poie_result.ops_queue,
+                    events=events,
+                    db=db,
+                    store_id=store_id,
+                )
+                result["decision_flow_phase"] = flow.get("phase")
+                result["light_tick"] = apply_light_tick(
+                    db, store_id, flow=flow, queue=poie_result.ops_queue
+                )
+            except Exception as exc:  # noqa: BLE001
+                result["light_tick_error"] = str(exc)[:80]
             # POIE 内部已接入 notification 推送
     except Exception as exc:  # noqa: BLE001 — POIE 失败不阻塞 Clock
         result["poie_error"] = str(exc)[:80]
@@ -282,67 +328,32 @@ def _run_clock_phase(db: Session, store_id: str, phase: str) -> dict:
 
 
 def _clock_marker_key(store_id: str, phase: str, day: str) -> str:
-    return f"clock_run:{store_id}:{day}:{phase}"
+    from app.services.operating_clock import clock_marker_key
+
+    return clock_marker_key(store_id, phase, day)
 
 
 def _clock_already_ran(db: Session, store_id: str, phase: str, day: str) -> bool:
-    from app.models.settings import AppSetting
+    from app.services.operating_clock import clock_already_ran
 
-    return (
-        db.execute(
-            select(AppSetting.id).where(AppSetting.key == _clock_marker_key(store_id, phase, day)).limit(1)
-        ).scalar_one_or_none()
-        is not None
-    )
+    return clock_already_ran(db, store_id, phase, day)
 
 
 def _mark_clock_ran(db: Session, store_id: str, phase: str, day: str) -> None:
-    from app.models.settings import AppSetting
+    from app.services.operating_clock import mark_clock_ran
 
-    db.add(AppSetting(key=_clock_marker_key(store_id, phase, day), value=datetime.now(timezone.utc).isoformat()))
-    db.commit()
+    mark_clock_ran(db, store_id, phase, day)
 
 
 @celery_app.task(name="ops.rhythm_tick")
 def rhythm_tick() -> dict:
     """WP1: 每 30 分钟一次的节律心跳——逐店按自己的经营节律命中 phase 才执行。
 
-    取代全网统一 crontab：夜宵店的高峰保护自然落到它 22:00 的真高峰。
-    幂等：每店每日每 phase 只跑一次（AppSetting 标记）。
+    与进程内时钟共用 tick_all_stores，每天每相位幂等一次。
     """
-    from zoneinfo import ZoneInfo
+    from app.services.operating_clock import tick_all_stores
 
-    from app.services.operating_rhythm import is_in_quiet_hours, match_phase, resolve_store_rhythm
-
-    now_local = datetime.now(ZoneInfo("Asia/Shanghai"))
-    day = now_local.strftime("%Y-%m-%d")
-    hour = now_local.hour
-
-    db = SessionLocal()
-    try:
-        store_ids = list(db.execute(select(Store.id).where(Store.status == "active")).scalars())
-        results = []
-        for store_id in store_ids:
-            try:
-                rhythm = resolve_store_rhythm(db, store_id)
-                phase = match_phase(hour, rhythm)
-                if not phase:
-                    results.append({"store_id": store_id, "phase": None, "status": "no_phase"})
-                    continue
-                if is_in_quiet_hours(rhythm, hour) and phase not in ("night_learn", "deep_review"):
-                    results.append({"store_id": store_id, "phase": phase, "status": "quiet_hours"})
-                    continue
-                if _clock_already_ran(db, store_id, phase, day):
-                    results.append({"store_id": store_id, "phase": phase, "status": "already_ran"})
-                    continue
-                phase_result = _run_clock_phase(db, store_id, phase)
-                _mark_clock_ran(db, store_id, phase, day)
-                results.append({"store_id": store_id, "phase": phase, "rhythm_source": rhythm.source, **phase_result})
-            except Exception as exc:  # noqa: BLE001
-                results.append({"store_id": store_id, "error": str(exc)[:100]})
-        return {"tick_at": now_local.isoformat(), "store_count": len(store_ids), "results": results}
-    finally:
-        db.close()
+    return tick_all_stores(heavy=True)
 
 
 @celery_app.task(name="ops.follow_up_decisions")
@@ -382,13 +393,27 @@ def follow_up_decisions() -> dict:
             except Exception as exc:  # noqa: BLE001
                 results.append({"decision_id": decision.id, "error": str(exc)[:80]})
         db.commit()
-        return {"checked": len(due), "results": results}
+        loop_tick = {"checked": 0, "ready": []}
+        try:
+            from app.services.closed_loop import tick_observing_loops
+
+            loop_tick = tick_observing_loops(db)
+        except Exception as exc:  # noqa: BLE001
+            loop_tick = {"error": str(exc)[:80]}
+        nag = {"count": 0}
+        try:
+            from app.services.store_ops import nag_overdue_human_tasks
+
+            nag = nag_overdue_human_tasks(db)
+        except Exception as exc:  # noqa: BLE001
+            nag = {"error": str(exc)[:80]}
+        return {"checked": len(due), "results": results, "loops": loop_tick, "nags": nag}
     finally:
         db.close()
 
 
 def _evaluate_decision_outcome(db: Session, decision: OperatingDecision) -> dict:
-    """评估单个决策的结果。"""
+    """评估单个决策的结果——含 Decision Core 活动复盘。"""
     from app.services.experiment_attribution import evaluate_experiment
 
     # 如果有关联的 experiment，复用归因逻辑
@@ -402,9 +427,40 @@ def _evaluate_decision_outcome(db: Session, decision: OperatingDecision) -> dict
         ).scalar_one_or_none()
         if exp and exp.result in ("pending", None):
             outcome = evaluate_experiment(db, exp, days=7)
+
+            # Decision Core 活动复盘：检查 stop_conditions 是否触发
+            verdict = outcome.result
+            try:
+                import json as _json
+                from app.models.ohre import Recommendation
+
+                rec = db.get(Recommendation, exp.recommendation_id)
+                if rec and rec.content_json:
+                    content = _json.loads(rec.content_json)
+                    if content.get("source") == "decision_core_campaign":
+                        # 检查 guardrail
+                        stop_conditions = content.get("stop_conditions") or []
+                        guardrail_metrics = content.get("guardrail_metrics") or []
+                        # 如果 lift 为负 → 触发 stop
+                        if outcome.lift_pct is not None and outcome.lift_pct <= -2:
+                            verdict = "negative"
+                        # 推送活动复盘通知
+                        from app.services.notification_service import notify_store_owner
+
+                        notify_store_owner(
+                            db,
+                            store_id=decision.store_id,
+                            notification_type="experiment_result",
+                            title=f"活动测试结果：{verdict}",
+                            body=f"订单变化 {outcome.lift_pct:+.1f}%。{'建议保留' if verdict == 'positive' else '建议停止' if verdict == 'negative' else '效果不明显，继续观察'}",
+                            priority="high" if verdict == "negative" else "normal",
+                        )
+            except Exception:  # noqa: BLE001
+                pass
+
             return {
                 "conclusive": outcome.result in ("positive", "negative", "neutral", "unknown"),
-                "verdict": outcome.result,
+                "verdict": verdict,
                 "lift_pct": outcome.lift_pct,
             }
     # 无实验：检查 confidence 是否足够

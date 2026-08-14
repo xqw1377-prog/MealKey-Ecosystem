@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MealKey Competitive Strategy V1</title>
+  <style>
+    :root {
+      --bg: #111318;
+      --panel: #1a1d24;
+      --line: #2a2f3a;
+      --text: #e8eaef;
+      --muted: #9aa3b2;
+      --accent: #c9a227;
+      --ok: #3d9a6a;
+      --warn: #c9842a;
+      --info: #4d8fd6;
+      --danger: #c45c5c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 64px; }
+    h1 { font-size: 24px; font-weight: 650; margin: 0 0 8px; }
+    h2 { font-size: 18px; font-weight: 650; margin: 28px 0 12px; }
+    h3 { font-size: 15px; font-weight: 650; margin: 20px 0 8px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .lead { color: var(--text); font-size: 15px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 24px; }
+    .tabs button {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .tabs button.on { color: var(--text); border-color: var(--accent); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--ok);
+      background: var(--panel);
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .callout.info { border-left-color: var(--info); }
+    .callout.warn { border-left-color: var(--warn); }
+    .callout.danger { border-left-color: var(--danger); }
+    .callout b { display: block; margin-bottom: 4px; color: var(--text); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+    .stats.five { grid-template-columns: repeat(5, 1fr); }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .stat strong { display: block; font-size: 20px; margin-bottom: 4px; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .cards { display: grid; gap: 10px; }
+    .cards.two { grid-template-columns: 1fr 1fr; }
+    .cards.three { grid-template-columns: repeat(3, 1fr); }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .card h3 { margin: 0 0 8px; }
+    .card p { margin: 0; }
+    .sentence { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; }
+    .sentence b { color: var(--accent); margin-right: 8px; }
+    .chain { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+    .chain span {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      background: var(--panel);
+    }
+    @media (max-width: 720px) {
+      .stats, .stats.five, .cards.two, .cards.three { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>MealKey Competitive Strategy V1</h1>
+    <p class="lead">冻结日 2026-08-13。平台是执行场，MealKey 是商家的经营控制层。</p>
+    <div class="tabs" id="tabs"></div>
+
+    <section class="panel on" id="freeze">
+      <div class="callout"><b>冻结句</b>站在这家商户整体利润和长期经营目标上，现在整盘生意最该做什么？美团、淘宝闪购、京东可以继续变强。MealKey 不需要在每个平台内部比它们更懂自己。</div>
+      <div class="stats five">
+        <div class="stat"><strong>20</strong><span>付费店 · 证明商业</span></div>
+        <div class="stat"><strong>100</strong><span>已验证闭环 · PMF 种子</span></div>
+        <div class="stat"><strong>10</strong><span>记忆改了判断</span></div>
+        <div class="stat"><strong>1</strong><span>自然续费</span></div>
+        <div class="stat"><strong>真实</strong><span>AI Cost / Store</span></div>
+      </div>
+      <h2>系统定位</h2>
+      <p class="lead">对用户叫 AI 外卖店长。对公司，它是 Merchant Operating Control Plane：下面接平台/POS/ERP/成本/老板输入，上面只有商家经营目标。</p>
+      <p>平台越多，MealKey 价值越大。不是平台越强，MealKey 就越弱。</p>
+      <h2>六句冻结</h2>
+      <div class="sentence"><b>1</b>不跟平台争谁更懂平台，争谁更懂老板整盘生意。</div>
+      <div class="sentence"><b>2</b>跨平台是进入市场的楔子，不是长期护城河。</div>
+      <div class="sentence"><b>3</b>Business Truth 是决策基础，Outcome Data 是核心资产，Strategy Memory 是复利。</div>
+      <div class="sentence"><b>4</b>Agent、Runtime、长程任务、单平台自动化都不是长期壁垒。</div>
+      <div class="sentence"><b>5</b>第一阶段不追求功能最多，而追求最多真实 Closed Loop。</div>
+      <div class="sentence"><b>6</b>架构领先只有经过付费门店、真实动作和真实结果之后，才会转化成公司壁垒。</div>
+    </section>
+
+    <section class="panel" id="loop">
+      <div class="callout warn"><b>不争场内第一，不等于放弃场内执行</b>不追求场内能力全面第一，但必须达到 Closed Loop 所需的最低执行深度。如果永远停在「我告诉你怎么做，你自己去平台改」，WorkThread 和 Result 会被卡在最后一公里。</div>
+      <h2>最低执行链</h2>
+      <div class="chain">
+        <span>Decision</span><span>ActionSpec</span><span>Platform Action</span><span>Read Back</span><span>Result</span>
+      </div>
+      <p>V1 写回只要求这三条能走完：普通评价回复、商品标题、商品主图。</p>
+      <h2>不跟平台比的</h2>
+      <table>
+        <tr><th>不争</th><th>必须够用</th></tr>
+        <tr><td>CPC 底层实时竞价基础设施</td><td>有投流数据才能建议，无数据 fail-closed</td></tr>
+        <tr><td>IM 基础设施</td><td>评价主题能进入闭环</td></tr>
+        <tr><td>平台内活动系统</td><td>活动该不该参加能进决策</td></tr>
+        <tr><td>配送调度</td><td>履约异常能被发现</td></tr>
+      </table>
+    </section>
+
+    <section class="panel" id="moat">
+      <div class="callout danger"><b>100 条闭环不是护城河</b>0–100 只证明系统不是假的。这是 PMF Evidence Seed。代码可以抄，这段历史不能瞬间抄。</div>
+      <table>
+        <tr><th>规模</th><th>含义</th></tr>
+        <tr><td>0–100</td><td>证明系统不是假的</td></tr>
+        <tr><td>100–1,000</td><td>开始校准 Playbook</td></tr>
+        <tr><td>1,000–10,000</td><td>开始形成 Strategy Memory 价值</td></tr>
+        <tr><td>10,000+</td><td>开始形成数据网络效应</td></tr>
+        <tr><td>更大规模</td><td>才真正谈得上难复制的 Outcome Dataset</td></tr>
+      </table>
+      <h2>真正的 moat</h2>
+      <p class="lead">越来越多不同类型门店 × 真实经营状态 × 真实 Action × 长期 Result → Strategy Library。</p>
+      <div class="cards three">
+        <div class="card"><h3>Business Truth</h3><p>决策基础。整盘利润账，不是某一平台的账。</p></div>
+        <div class="card"><h3>Outcome Data</h3><p>核心资产。做了什么、最后怎样。</p></div>
+        <div class="card"><h3>Strategy Memory</h3><p>复利。必须能改下一次判断，否则只是数据库装饰品。</p></div>
+      </div>
+    </section>
+
+    <section class="panel" id="wars">
+      <div class="callout info"><b>第五战场：Cost of Intelligence</b>平台 AI 可以免费。比赛不是谁调用最强模型最多，而是谁能用更少的 AI 成本做出更高价值的经营判断。</div>
+      <table>
+        <tr><th>战场</th><th>MealKey 战略</th></tr>
+        <tr><td>场内数据与执行</td><td>够用，不争全面第一</td></tr>
+        <tr><td>跨平台整盘生意</td><td>必须领先</td></tr>
+        <tr><td>经营闭环与记忆</td><td>核心领先区</td></tr>
+        <tr><td>商业牵引 / 分发</td><td>当前必须补齐</td></tr>
+        <tr><td>单位智能成本</td><td>规模化生死线</td></tr>
+      </table>
+      <h2>为什么这些工程选择是竞争战略</h2>
+      <p>确定性计算优先 · POIE 先过滤 · Context Projection · Model Router · Memory Retrieve 而不是 Dump · Token 真实计费。它们不是省钱技巧，是跟免费平台 AI 共存的方式。</p>
+    </section>
+
+    <section class="panel" id="roadmap">
+      <h2>必须做</h2>
+      <table>
+        <tr><th>事项</th><th>增加的资产</th></tr>
+        <tr><td>真实成本、订单、广告、评价、活动导入</td><td>Business Truth</td></tr>
+        <tr><td>真实 Action 执行 / 人工确认 / Read Back</td><td>Outcome Data</td></tr>
+        <tr><td>Experiment / Attribution / Memory BOOST</td><td>Strategy Memory</td></tr>
+        <tr><td>Partner / Result Card / Audit / 连锁扩店</td><td>Distribution</td></tr>
+      </table>
+      <h2>暂时不重要</h2>
+      <p>第 14 个 Agent。更漂亮的 BI。覆盖所有平台所有写接口。复杂 CRM。除非影响试点，否则不重造移动端 App。</p>
+      <h2>商业模式对得上</h2>
+      <div class="cards two">
+        <div class="card"><h3>¥300 / 店 / 月</h3><p>买的是经营控制层的持续经营能力，不是某个平台功能。</p></div>
+        <div class="card"><h3>AI 算力独立</h3><p>Intelligence 是变量成本。不能为了跟平台免费竞争把模型成本包死。</p></div>
+        <div class="card"><h3>Partner Y1 50%–70%</h3><p>当前最大短板是 Distribution = 0。第一年收入换 Paid Active Stores。</p></div>
+        <div class="card"><h3>Y2 30% / Y3 20% / Y4+ 10%</h3><p>第一年获得数据节点，后几年获取利润。经济模型来自 Retention。</p></div>
+      </div>
+    </section>
+
+    <section class="panel" id="evidence">
+      <div class="callout"><b>下一件事</b>尽快把设计优势转化成真实 Outcome Data 优势。这才是跟美团、店客多、有赞真正拉开距离的比赛。</div>
+      <table>
+        <tr><th>验收</th><th>证明什么</th></tr>
+        <tr><td>20 Paid Stores</td><td>有人愿意付钱</td></tr>
+        <tr><td>100 Verified Closed Loops</td><td>闭环能跑（仍不是 moat）</td></tr>
+        <tr><td>10 Memory-Changed Decisions</td><td>过去的 Result 改了这一次判断</td></tr>
+        <tr><td>1 Natural Renewal</td><td>价值不是新鲜感</td></tr>
+        <tr><td>真实 AI Cost / Store</td><td>单位经济可以扩张</td></tr>
+      </table>
+    </section>
+  </div>
+  <script>
+    const tabs = [
+      ["freeze", "冻结"],
+      ["loop", "最低执行"],
+      ["moat", "护城河阶梯"],
+      ["wars", "五大战场"],
+      ["roadmap", "必须 / 不做"],
+      ["evidence", "五条验收"],
+    ];
+    const bar = document.getElementById("tabs");
+    tabs.forEach(([id, label], i) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      if (i === 0) btn.className = "on";
+      btn.onclick = () => {
+        document.querySelectorAll(".tabs button").forEach((el) => el.classList.remove("on"));
+        document.querySelectorAll(".panel").forEach((el) => el.classList.remove("on"));
+        btn.classList.add("on");
+        document.getElementById(id).classList.add("on");
+      };
+      bar.appendChild(btn);
+    });
+  </script>
+</body>
+</html>

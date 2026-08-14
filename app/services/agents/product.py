@@ -877,10 +877,16 @@ def apply_product_action(
     db.add(recommendation)
     db.flush()
 
+    from app.services.thread_engine import ensure_thread_for_action
+    thread = ensure_thread_for_action(db, store_id, f"商品优化：{action_type}")
+    recommendation.work_thread_id = thread.id
+    db.flush()
+
     metric = ctx.store_state.kpis.get(expected_metric)
     experiment = Experiment(
         recommendation_id=recommendation.id,
         store_id=store_id,
+        work_thread_id=thread.id,
         item_id=new_item_id,
         baseline_value=metric.observed_value if metric else None,
         observed_value=None,

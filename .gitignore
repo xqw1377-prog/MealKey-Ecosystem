@@ -1,5 +1,6 @@
 .env
 .env.local
+.vercel/
 .venv/
 venv/
 __pycache__/
@@ -17,3 +18,4 @@ data/
 # Temp
 *.tmp
 SYNC_MARKER.txt
+.vercel

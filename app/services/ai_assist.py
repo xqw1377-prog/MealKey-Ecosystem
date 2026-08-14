@@ -45,6 +45,11 @@ def build_setup_checklist(db: Session, store: Store | None) -> dict[str, Any]:
 
     amap_ready = _configured("amap_web_service_key", settings.amap_web_service_key)
     connector_ready = _configured("platform_connector_url", settings.platform_connector_url)
+    store_ops_ready = False
+    if store:
+        from app.services.store_ops import load_roster
+
+        store_ops_ready = bool(load_roster(db, store.id).get("ready"))
 
     steps = [
         {
@@ -74,6 +79,13 @@ def build_setup_checklist(db: Session, store: Store | None) -> dict[str, Any]:
             "done": platform_connected,
             "hint": "演示模式可立即同步；正式环境填平台对接 URL 后用 HTTP 模式。",
             "action": "assist_platform",
+        },
+        {
+            "key": "store_ops",
+            "title": "设置门店执行人（店长）",
+            "done": store_ops_ready,
+            "hint": "线下整改要派给具体的人。写下店长姓名后，系统会生成门店任务页；没有证据不能算做完。",
+            "action": "open_settings_ops",
         },
         {
             "key": "maps",
@@ -198,6 +210,23 @@ def answer_assist_question(question: str, *, db: Session, store: Store | None) -
     platform_tokens = ("对接", "美团", "饿了么", "平台", "api", "连接码", "同步")
     settings_tokens = ("设置", "基础数据", "门店资料", "高德", "配置")
     storefront_tokens = ("装修", "店页", "主图", "头图", "图片优化", "视觉", "拍照")
+    poster_tokens = ("海报", "促销海报", "活动海报", "宣传图", "朋友圈图")
+
+    if any(token in text for token in poster_tokens) and "主图" not in text and "头图" not in text:
+        if store is None:
+            return {
+                "intent": "promo_poster",
+                "conclusion": "先选门店，再做促销海报。",
+                "actions": ["选择门店后打开促销海报插件"],
+            }
+        from app.services.promo_poster import build_promo_poster
+
+        pack = build_promo_poster(db, store, prompt=question)
+        return {
+            **pack,
+            "actions": ["在首页预览海报", "下载图片发朋友圈或平台活动"],
+            "guide": {"topic": "promo_poster", "plugin": "promo_poster"},
+        }
 
     if any(token in text for token in deploy_tokens):
         guide = assist_deploy()

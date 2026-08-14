@@ -71,6 +71,15 @@ class MenuItem(IdMixin, TimestampMixin, Base):
     current_version_id: Mapped[Optional[str]] = mapped_column(ForeignKey("menu_item_version.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # 成本缓存(从 CostRecord 最近一条同步,供 calculate_profit 快速读取)
+    food_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    packaging_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cost_source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    cost_confidence: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    cost_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     store: Mapped["Store"] = relationship(back_populates="items")
     versions: Mapped[list["MenuItemVersion"]] = relationship(
         back_populates="item",
@@ -134,6 +143,10 @@ class ShopFunnelDaily(Base):
     orders: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     aov: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # Provenance — 每条数据有来源,区分真实导入 vs mock/合成
+    data_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="platform_export")
+    ads_spend: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 当日推广费
+
 
 class ItemFunnelDaily(Base):
     __tablename__ = "item_funnel_daily"
@@ -147,6 +160,8 @@ class ItemFunnelDaily(Base):
     gmv: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     ctr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cvr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # observed = 真实导入/平台；synthetic = 店级漏斗分摊，归因时降权
+    data_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 
 class ReviewFact(IdMixin, TimestampMixin, Base):
@@ -158,6 +173,8 @@ class ReviewFact(IdMixin, TimestampMixin, Base):
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reply_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    replied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ReviewNLP(Base):

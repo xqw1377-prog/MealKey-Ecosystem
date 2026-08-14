@@ -11,3 +11,4 @@ import os
 # 必须在所有 app 模块 import 之前设置
 os.environ["MEALKY_AGENT_LLM"] = "0"
 os.environ["MEALKY_DIAGNOSIS_LLM"] = "0"
+os.environ["MEALKEY_DISABLE_CLOCK"] = "1"

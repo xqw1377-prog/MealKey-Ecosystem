@@ -11,7 +11,7 @@ from app.db.base import Base
 logger = logging.getLogger(__name__)
 
 
-def apply_sqlite_schema_backfill(engine: Engine) -> None:
+def apply_schema_backfill(engine: Engine) -> None:
     """Backfill newly added columns for local SQLite and Postgres databases.
 
     The app currently auto-creates tables for local development, but `create_all`
@@ -24,6 +24,15 @@ def apply_sqlite_schema_backfill(engine: Engine) -> None:
         return
 
     inspector = inspect(engine)
+    missing_tables = [
+        table
+        for table in sorted(Base.metadata.tables.values(), key=lambda item: item.name)
+        if not inspector.has_table(table.name)
+    ]
+    if missing_tables:
+        Base.metadata.create_all(bind=engine, tables=missing_tables)
+        inspector = inspect(engine)
+
     with engine.begin() as conn:
         tables = sorted(Base.metadata.tables.values(), key=lambda item: item.name)
         for table in tables:
@@ -75,3 +84,6 @@ def _column_default_sql(value: Any) -> str | None:
         return str(value)
     text_value = str(value).replace("'", "''")
     return f"'{text_value}'"
+
+
+apply_sqlite_schema_backfill = apply_schema_backfill

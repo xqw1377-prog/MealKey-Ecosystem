@@ -23,6 +23,7 @@ class ActionTrace(IdMixin, TimestampMixin, Base):
 
     store_id: Mapped[str] = mapped_column(ForeignKey("store.id"))
     odo_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    work_thread_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     recommendation_id: Mapped[Optional[str]] = mapped_column(ForeignKey("recommendation.id"), nullable=True)
     experiment_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 

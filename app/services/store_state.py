@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.business_facts import AdSpendDaily, OpsMetricDaily
 from app.models.entities import (
     CompetitorMenuItem,
     CompetitorSnapshot,
     CompetitorStore,
     ItemFunnelDaily,
     MenuItem,
+    OrderFact,
+    OrderItemFact,
     ReviewFact,
     ReviewNLP,
     ShopFunnelDaily,
@@ -22,6 +25,7 @@ from app.models.entities import (
 from app.schemas.store_state import (
     CompetitionChange,
     CoreItem,
+    DataCoverage,
     DeltaMetric,
     FeedbackInfo,
     MarketInfo,
@@ -66,6 +70,7 @@ def _sum_shop(db: Session, store_id: str, from_day: date, to_day: date):
             func.sum(ShopFunnelDaily.orders).label("orders"),
             func.sum(ShopFunnelDaily.impressions).label("impressions"),
             func.sum(ShopFunnelDaily.visits).label("visits"),
+            func.sum(ShopFunnelDaily.ads_spend).label("ads_spend"),
         )
         .where(ShopFunnelDaily.store_id == store_id)
         .where(ShopFunnelDaily.day >= from_day)
@@ -74,12 +79,152 @@ def _sum_shop(db: Session, store_id: str, from_day: date, to_day: date):
     return db.execute(stmt).mappings().one()
 
 
+def _sum_ads(db: Session, store_id: str, from_day: date, to_day: date) -> Optional[float]:
+    val = db.execute(
+        select(func.sum(AdSpendDaily.cost)).where(
+            AdSpendDaily.store_id == store_id,
+            AdSpendDaily.day >= from_day,
+            AdSpendDaily.day <= to_day,
+        )
+    ).scalar()
+    return float(val) if val is not None else None
+
+
+def _sum_orders(db: Session, store_id: str, from_day: date, to_day: date) -> tuple[Optional[float], Optional[float]]:
+    start = datetime.combine(from_day, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(to_day, time.max, tzinfo=timezone.utc)
+    row = db.execute(
+        select(
+            func.sum(OrderFact.gmv).label("gmv"),
+            func.count(OrderFact.id).label("orders"),
+        ).where(
+            OrderFact.store_id == store_id,
+            OrderFact.ordered_at >= start,
+            OrderFact.ordered_at <= end,
+        )
+    ).mappings().one()
+    count = int(row["orders"] or 0)
+    if count <= 0:
+        return None, None
+    return float(row["gmv"] or 0), float(count)
+
+
+def _item_qty_map(db: Session, store_id: str, from_day: date, to_day: date) -> dict[str, float]:
+    start = datetime.combine(from_day, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(to_day, time.max, tzinfo=timezone.utc)
+    rows = db.execute(
+        select(OrderItemFact.item_id, func.sum(OrderItemFact.qty).label("qty"))
+        .join(OrderFact, OrderItemFact.order_id == OrderFact.id)
+        .where(
+            OrderFact.store_id == store_id,
+            OrderFact.ordered_at >= start,
+            OrderFact.ordered_at <= end,
+            OrderItemFact.item_id.is_not(None),
+        )
+        .group_by(OrderItemFact.item_id)
+    ).all()
+    return {str(item_id): float(qty or 0) for item_id, qty in rows if item_id}
+
+
+def _avg_rating(db: Session, store_id: str, from_day: date, to_day: date) -> Optional[float]:
+    start = datetime.combine(from_day, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(to_day, time.max, tzinfo=timezone.utc)
+    val = db.execute(
+        select(func.avg(ReviewFact.rating)).where(
+            ReviewFact.store_id == store_id,
+            ReviewFact.reviewed_at >= start,
+            ReviewFact.reviewed_at <= end,
+            ReviewFact.rating.is_not(None),
+        )
+    ).scalar()
+    return float(val) if val is not None else None
+
+
+def _avg_ops(db: Session, store_id: str, from_day: date, to_day: date) -> dict[str, Optional[float]]:
+    row = db.execute(
+        select(
+            func.avg(OpsMetricDaily.im_reply_rate).label("im_reply_rate"),
+            func.avg(OpsMetricDaily.meal_prep_rate).label("meal_prep_rate"),
+            func.avg(OpsMetricDaily.on_time_delivery_rate).label("on_time_delivery_rate"),
+            func.avg(OpsMetricDaily.merchant_cancel_rate).label("merchant_cancel_rate"),
+        ).where(
+            OpsMetricDaily.store_id == store_id,
+            OpsMetricDaily.day >= from_day,
+            OpsMetricDaily.day <= to_day,
+        )
+    ).mappings().one()
+    return {
+        "im_reply_rate": float(row["im_reply_rate"]) if row["im_reply_rate"] is not None else None,
+        "meal_prep_rate": float(row["meal_prep_rate"]) if row["meal_prep_rate"] is not None else None,
+        "on_time_delivery_rate": float(row["on_time_delivery_rate"]) if row["on_time_delivery_rate"] is not None else None,
+        "merchant_cancel_rate": float(row["merchant_cancel_rate"]) if row["merchant_cancel_rate"] is not None else None,
+    }
+
+
+def _has_synthetic_item_funnel(db: Session, item_ids: list[str], from_day: date, to_day: date) -> bool:
+    if not item_ids:
+        return False
+    count = db.execute(
+        select(func.count()).select_from(ItemFunnelDaily).where(
+            ItemFunnelDaily.item_id.in_(item_ids),
+            ItemFunnelDaily.day >= from_day,
+            ItemFunnelDaily.day <= to_day,
+            ItemFunnelDaily.data_source == "synthetic",
+        )
+    ).scalar() or 0
+    return count > 0
+
+
 def _delta_pct(baseline: Optional[float], observed: Optional[float]) -> Optional[float]:
     if baseline is None or observed is None:
         return None
     if baseline == 0:
         return None
     return (observed - baseline) / baseline * 100.0
+
+
+def _aggregate_store_cost(
+    menu_items: list[MenuItem],
+    orders: Optional[float],
+    qty_by_item: Optional[dict[str, float]] = None,
+) -> dict:
+    """从 MenuItem 缓存列聚合门店级成本。
+
+    有订单明细时按真实销量加权；否则按订单均摊（并标成 allocated）。
+    """
+    items_with_cost = [
+        i for i in menu_items
+        if i.food_cost is not None or i.packaging_cost is not None
+    ]
+    if not items_with_cost:
+        return {}
+
+    used_qty = bool(qty_by_item)
+    if used_qty:
+        total_food = sum((i.food_cost or 0) * float(qty_by_item.get(i.id, 0)) for i in items_with_cost)
+        total_pack = sum((i.packaging_cost or 0) * float(qty_by_item.get(i.id, 0)) for i in items_with_cost)
+        if total_food <= 0 and total_pack <= 0:
+            used_qty = False
+
+    if not used_qty:
+        n_items = len(items_with_cost) or 1
+        est_orders_per_item = (orders or 0) / n_items if orders else 1.0
+        total_food = sum((i.food_cost or 0) * est_orders_per_item for i in items_with_cost)
+        total_pack = sum((i.packaging_cost or 0) * est_orders_per_item for i in items_with_cost)
+
+    confidences = [i.cost_confidence for i in items_with_cost if i.cost_confidence]
+    min_confidence = min(confidences, key=lambda c: {"high": 0, "medium": 1, "low": 2}.get(c, 9)) if confidences else "medium"
+    sources = [i.cost_source for i in items_with_cost if i.cost_source]
+    cost_source = sources[0] if sources else "observed"
+    if not used_qty:
+        cost_source = "allocated"
+
+    return {
+        "food_cost": total_food if total_food > 0 else None,
+        "packaging_cost": total_pack if total_pack > 0 else None,
+        "cost_source": cost_source,
+        "cost_confidence": min_confidence,
+    }
 
 
 def _competitor_menu_map(db: Session, snapshot_id: str) -> dict[str, CompetitorMenuItem]:
@@ -283,7 +428,101 @@ def _build_feedback(db: Session, store_id: str) -> FeedbackInfo:
 
     # 类型化关键词：按主题分从高到低排前5
     keywords.sort(key=lambda row: row.get("score") or 0, reverse=True)
-    return FeedbackInfo(keywords=keywords[:5], scores=scores)
+
+    # ── 差评闭环信号:近 30 天评价的差评率 ──
+    cutoff = date.today() - timedelta(days=30)
+    recent_reviews = [r for r in reviews if r.reviewed_at and r.reviewed_at.date() >= cutoff]
+    recent_bad = [r for r in recent_reviews if r.rating is not None and float(r.rating) <= 3.0]
+    bad_rate = (len(recent_bad) / len(recent_reviews)) if recent_reviews else None
+    recent_bad_samples = [
+        {"rating": float(r.rating), "content": (r.content or "")[:100], "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None}
+        for r in recent_bad[:5]
+    ]
+
+    return FeedbackInfo(
+        keywords=keywords[:5],
+        scores=scores,
+        recent_review_count=len(recent_reviews),
+        recent_bad_review_count=len(recent_bad),
+        bad_review_rate=bad_rate,
+        recent_bad_reviews=recent_bad_samples,
+    )
+
+
+def _build_ads_summary(db: Session, store_id: str, from_day: date, to_day: date):
+    """从 AdSpendDaily 聚合投流摘要 + 调用 analyze_ads 诊断。"""
+    from app.schemas.store_state import AdsSummary
+
+    rows = list(
+        db.execute(
+            select(AdSpendDaily)
+            .where(
+                AdSpendDaily.store_id == store_id,
+                AdSpendDaily.day >= from_day,
+                AdSpendDaily.day <= to_day,
+            )
+            .order_by(AdSpendDaily.day)
+        ).scalars()
+    )
+    if not rows:
+        return AdsSummary()
+
+    total_cost = sum(r.cost or 0 for r in rows)
+    total_clicks = sum(r.clicks or 0 for r in rows)
+    total_ads_orders = sum(r.orders_from_ads or 0 for r in rows)
+    avg_cpc_vals = [r.cpc for r in rows if r.cpc is not None]
+    avg_roas_vals = [r.roas for r in rows if r.roas is not None]
+    avg_ctr_vals = [r.ctr for r in rows if r.ctr is not None]
+
+    # CPC/ROAS 趋势
+    cpc_trend = None
+    roas_trend = None
+    if len(rows) >= 2:
+        first_cpc = rows[0].cpc
+        last_cpc = rows[-1].cpc
+        if first_cpc and last_cpc and first_cpc > 0:
+            cpc_trend = round((last_cpc - first_cpc) / first_cpc * 100, 1)
+        first_roas = rows[0].roas
+        last_roas = rows[-1].roas
+        if first_roas and last_roas and first_roas > 0:
+            roas_trend = round((last_roas - first_roas) / first_roas * 100, 1)
+
+    daily_rows = [
+        {
+            "day": r.day.isoformat() if r.day else "",
+            "cost": r.cost,
+            "clicks": r.clicks,
+            "cpc": r.cpc,
+            "roas": r.roas,
+            "ctr": r.ctr,
+        }
+        for r in rows
+    ]
+
+    # 调用 analyze_ads 诊断
+    from app.services.domain_skills import analyze_ads
+
+    ads_result = analyze_ads(
+        ads_daily=daily_rows,
+        profit_floor=None,
+        product_ready=True,
+    )
+    findings_text = [f"{f.title}: {f.description}" for f in ads_result.findings]
+
+    return AdsSummary(
+        total_cost=round(total_cost, 1),
+        avg_daily_cost=round(total_cost / len(rows), 1),
+        avg_cpc=round(sum(avg_cpc_vals) / len(avg_cpc_vals), 2) if avg_cpc_vals else None,
+        avg_roas=round(sum(avg_roas_vals) / len(avg_roas_vals), 2) if avg_roas_vals else None,
+        avg_ctr=round(sum(avg_ctr_vals) / len(avg_ctr_vals), 4) if avg_ctr_vals else None,
+        total_clicks=total_clicks,
+        total_ads_orders=total_ads_orders,
+        cpc_trend_pct=cpc_trend,
+        roas_trend_pct=roas_trend,
+        days=len(rows),
+        daily_rows=daily_rows[-7:],  # 最近7天
+        findings=findings_text,
+    )
 
 
 def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[StoreState]:
@@ -314,6 +553,33 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
     observed_impr = float(obs["impressions"] or 0)
     baseline_vis = float(base["visits"] or 0)
     observed_vis = float(obs["visits"] or 0)
+
+    order_obs_gmv, order_obs_count = _sum_orders(db, store_id, w.observe_from, w.observe_to)
+    order_base_gmv, order_base_count = _sum_orders(db, store_id, w.baseline_from, w.baseline_to)
+    orders_observed = order_obs_count is not None
+    if orders_observed:
+        observed_gmv = float(order_obs_gmv or 0)
+        observed_orders = float(order_obs_count or 0)
+        if order_base_count is not None:
+            baseline_gmv = float(order_base_gmv or 0)
+            baseline_orders = float(order_base_count or 0)
+
+    ads_from_table = _sum_ads(db, store_id, w.observe_from, w.observe_to)
+    ads_base_table = _sum_ads(db, store_id, w.baseline_from, w.baseline_to)
+    funnel_ads = float(obs["ads_spend"] or 0) if obs.get("ads_spend") else None
+    funnel_ads_base = float(base["ads_spend"] or 0) if base.get("ads_spend") else None
+    if ads_from_table is not None:
+        observed_ads = ads_from_table
+        baseline_ads = ads_base_table
+        ads_source = "ad_spend_daily"
+    elif funnel_ads is not None:
+        observed_ads = funnel_ads
+        baseline_ads = funnel_ads_base
+        ads_source = "shop_funnel"
+    else:
+        observed_ads = None
+        baseline_ads = None
+        ads_source = "missing"
 
     baseline_ctr = (baseline_vis / baseline_impr) if baseline_impr else None
     observed_ctr = (observed_vis / observed_impr) if observed_impr else None
@@ -358,6 +624,16 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
             confidence=0.8,
         ),
     }
+    observed_rating = _avg_rating(db, store_id, w.observe_from, w.observe_to)
+    baseline_rating = _avg_rating(db, store_id, w.baseline_from, w.baseline_to)
+    if observed_rating is not None or baseline_rating is not None:
+        kpis["rating"] = DeltaMetric(
+            delta_pct=_delta_pct(baseline_rating, observed_rating),
+            value=observed_rating,
+            baseline_value=baseline_rating,
+            observed_value=observed_rating,
+            confidence=0.75,
+        )
 
     # core items: top by orders in observe window
     stmt = (
@@ -427,6 +703,7 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
         mid_bad = max(0.0, min(0.45, (4.8 - float(avg_rating)) * 0.12))
 
     business = build_business_state(kpis)
+    ops = _avg_ops(db, store_id, w.observe_from, w.observe_to)
     platform_health = build_platform_health_state(
         store_rating=float(avg_rating) if avg_rating is not None else None,
         mid_bad_review_rate=mid_bad,
@@ -434,12 +711,19 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
         hero_sku_in_stock_rate=1.0,
         activity_valid=True,
         open_status="open",
+        im_reply_rate=ops["im_reply_rate"],
+        meal_prep_rate=ops["meal_prep_rate"],
+        on_time_delivery_rate=ops["on_time_delivery_rate"],
+        merchant_cancel_rate=ops["merchant_cancel_rate"],
     )
+    qty_by_item = _item_qty_map(db, store_id, w.observe_from, w.observe_to)
     profit = build_profit_state(
         gross_gmv=observed_gmv,
         orders=observed_orders,
+        ads_spend=observed_ads,
         baseline_gmv=baseline_gmv,
         baseline_orders=baseline_orders,
+        **_aggregate_store_cost(menu_items, observed_orders, qty_by_item),
     )
     # Peer funnel proxies from watched competitors are limited in V1; leave empty unless we have CTR-like proxies later.
     benchmark = build_benchmark_state(
@@ -456,6 +740,42 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
     # Enrich business judgment with benchmark when available
     if benchmark.available and benchmark.judgment:
         business.judgment = f"{business.judgment} {benchmark.judgment}".strip()
+
+    ads_days = db.execute(
+        select(func.count()).select_from(AdSpendDaily).where(
+            AdSpendDaily.store_id == store_id,
+            AdSpendDaily.day >= w.observe_from,
+            AdSpendDaily.day <= w.observe_to,
+        )
+    ).scalar() or 0
+    funnel_days = db.execute(
+        select(func.count()).select_from(ShopFunnelDaily).where(
+            ShopFunnelDaily.store_id == store_id,
+            ShopFunnelDaily.day >= w.observe_from,
+            ShopFunnelDaily.day <= w.observe_to,
+        )
+    ).scalar() or 0
+    review_count = db.execute(
+        select(func.count()).select_from(ReviewFact).where(ReviewFact.store_id == store_id)
+    ).scalar() or 0
+    order_rows = db.execute(
+        select(func.count()).select_from(OrderFact).where(OrderFact.store_id == store_id)
+    ).scalar() or 0
+    coverage = DataCoverage(
+        funnel_days=int(funnel_days),
+        ads_days=int(ads_days),
+        reviews=int(review_count),
+        order_rows=int(order_rows),
+        items_with_cost=sum(1 for i in menu_items if i.food_cost is not None),
+        synthetic_item_funnel=_has_synthetic_item_funnel(
+            db, [i.id for i in menu_items], w.observe_from, w.observe_to
+        ),
+        ads_source=ads_source,
+        ads_observed=ads_source != "missing",
+        orders_observed=bool(orders_observed),
+    )
+
+    ads_summary = _build_ads_summary(db, store_id, w.observe_from, w.observe_to)
 
     state = StoreState(
         store=StoreInfo(
@@ -483,6 +803,8 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
         profit=profit,
         benchmark=benchmark,
         customer=customer,
+        data_coverage=coverage,
+        ads_summary=ads_summary,
         generated_at=datetime.now(timezone.utc),
     )
     return state

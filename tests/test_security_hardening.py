@@ -20,6 +20,7 @@ def _route_paths(application) -> list[str]:
 def test_production_app_excludes_dev_routes(monkeypatch):
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "api_token", "prod-secret-token")
+    monkeypatch.setattr(settings, "cors_origins", "https://app.example.com")
     application = create_app()
     paths = _route_paths(application)
     assert not any(path.startswith("/dev") for path in paths)

@@ -6,6 +6,7 @@ from app.api.routes_dev import seed_demo
 from app.db.base import Base
 from app.services.agents import build_single_agent
 from app.services.diagnosis_analysis import build_diagnosis_comparisons
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -17,6 +18,9 @@ def _session() -> Session:
 def test_diagnosis_agent_builds_multi_period_root_cause_report() -> None:
     db = _session()
     seeded = seed_demo(db)
+    # 诊断依赖 store 级 KPI（ctr/订单下滑信号）。seed_demo 的 funnel 是 synthetic
+    # 不被看 → 补 authorized_session observed 数据（数值口径与 demo 一致）。
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
 
     result = build_single_agent(db, seeded["store_id"], "diagnosis")
 

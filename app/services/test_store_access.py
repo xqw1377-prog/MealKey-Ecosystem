@@ -149,6 +149,10 @@ def _open_commercial(db: Session, store: Store) -> dict[str, Any]:
 
 def open_test_store_access(db: Session, store: Store) -> dict[str, Any]:
     """把一家店开到可经营：权限全开、MOS 满足、订阅已付、平台 mock 已连。"""
+    from app.services.seed_store import is_seed_store
+
+    if is_seed_store(db, store.id):
+        raise ValueError("种子店不能改走 Mock 测试开通")
     platform = _mark_platform_connected(db, store)
     understanding = _open_understanding(db, store)
     commercial = _open_commercial(db, store)

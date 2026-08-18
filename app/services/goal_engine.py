@@ -123,6 +123,7 @@ def update_goal_progress(db: Session, store_id: str, *, days: int = 7) -> int:
         forecast = current
         if current is not None and goal.metric in {"gmv", "orders"}:
             from app.models.entities import ShopFunnelDaily
+            from app.services.truth_resolution import production_funnel_clause
 
             from_day = today.fromordinal(today.toordinal() - 13)
             col = ShopFunnelDaily.gmv if goal.metric == "gmv" else ShopFunnelDaily.orders
@@ -134,6 +135,7 @@ def update_goal_progress(db: Session, store_id: str, *, days: int = 7) -> int:
                         ShopFunnelDaily.store_id == store_id,
                         ShopFunnelDaily.day >= from_day,
                         ShopFunnelDaily.day <= today,
+                        production_funnel_clause(ShopFunnelDaily.data_source),
                     )
                     .order_by(ShopFunnelDaily.day.asc())
                 ).all()

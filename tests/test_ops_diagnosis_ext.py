@@ -36,7 +36,7 @@ def test_settlement_forecast() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
     for i in range(5):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=3000, orders=100))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=3000, orders=100, data_source="file_import"))
     db.commit()
     r = diagnose_settlement_detail(db, sid)
     assert r["has_data"]
@@ -49,7 +49,7 @@ def test_settlement_cash_flow() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
     for i in range(3):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=1000, orders=30, ads_spend=200))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=1000, orders=30, ads_spend=200, data_source="file_import"))
     db.commit()
     r = diagnose_settlement_detail(db, sid)
     codes = [f["code"] for f in r["findings"]]
@@ -61,7 +61,7 @@ def test_staffing_prep_forecast() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
     for i in range(7):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), orders=80+i))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), orders=80+i, data_source="file_import"))
     db.commit()
     r = diagnose_staffing(db, sid)
     codes = [f["code"] for f in r["findings"]]
@@ -78,7 +78,7 @@ def test_staffing_bottleneck() -> None:
     db.add(OpsMetricDaily(store_id=sid, day=date.today(), meal_prep_rate=0.75, merchant_cancel_rate=0.01, im_reply_rate=0.9))
     # Need funnel data too so it has has_data
     for i in range(3):
-        db.add(ShopFunnelDaily(store_id=sid, day=date.today()-timedelta(days=i), orders=80))
+        db.add(ShopFunnelDaily(store_id=sid, day=date.today()-timedelta(days=i), orders=80, data_source="file_import"))
     db.commit()
     r = diagnose_staffing(db, sid)
     codes = [f["code"] for f in r["findings"]]
@@ -133,9 +133,9 @@ def test_content_health_no_image() -> None:
 def test_device_zero_order() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
-    db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=2), orders=50))
-    db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=1), orders=0))
-    db.add(ShopFunnelDaily(store_id=sid, day=today, orders=50))
+    db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=2), orders=50, data_source="file_import"))
+    db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=1), orders=0, data_source="file_import"))
+    db.add(ShopFunnelDaily(store_id=sid, day=today, orders=50, data_source="file_import"))
     db.commit()
     r = diagnose_device_health(db, sid)
     codes = [f["code"] for f in r["findings"]]
@@ -147,7 +147,7 @@ def test_new_store_advice() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
     for i in range(7):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), orders=50))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), orders=50, data_source="file_import"))
     db.commit()
     r = diagnose_new_store_setup(db, sid)
     assert r["has_data"]
@@ -173,7 +173,7 @@ def test_settlement_refund_gap_is_honest() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
     for i in range(5):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=3000, orders=100))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=3000, orders=100, data_source="file_import"))
     db.commit()
     r = diagnose_settlement_detail(db, sid)
     codes = [f["code"] for f in r["findings"]]
@@ -187,7 +187,7 @@ def test_project_ops_findings_filters_demand() -> None:
     db = _session(); sid = _seed(db)
     today = date.today()
     for i in range(5):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=3000, orders=100))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=3000, orders=100, data_source="file_import"))
     db.commit()
     facts = project_ops_findings(db, sid, 108)
     assert facts["ops_has_data"]

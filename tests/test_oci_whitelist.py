@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -31,6 +32,15 @@ from app.services.oci.ingest import (
     validate_corpus,
 )
 from app.services.oci.whitelist import P0_SOURCE_IDS, WHITELIST, by_id, enabled_sources, rule_sources
+
+# OCI 语料（data/cases/case_*.json）是外部 curated 数据集，不在 repo 内。
+# 缺语料时，语料依赖测试 explicit SKIP——不伪造语料、不假装通过。
+_CORPUS_FILES = iter_case_files()
+_CORPUS_REASON = (
+    "external OCI corpus unavailable (data/cases/case_*.json not bundled in repo; "
+    "need canonical >=33 case files)"
+)
+_CORPUS_AVAILABLE = len(_CORPUS_FILES) >= 33
 
 
 def _session() -> Session:
@@ -145,6 +155,7 @@ def test_yelp_and_long_book_excerpt_rejected() -> None:
         pass
 
 
+@pytest.mark.skipif(not _CORPUS_AVAILABLE, reason=_CORPUS_REASON)
 def test_ingest_seeds_keeps_conflict_and_does_not_write_memory() -> None:
     db = _session()
     result = ingest_seed_corpus(db)
@@ -170,6 +181,7 @@ def test_ingest_seeds_keeps_conflict_and_does_not_write_memory() -> None:
     assert all(row.status != "graduated_to_strategy_memory" for row in rows)
 
 
+@pytest.mark.skipif(not _CORPUS_AVAILABLE, reason=_CORPUS_REASON)
 def test_retrieve_priors_are_case_prior_only_and_skip_research() -> None:
     hits = retrieve_case_priors(demand_code="ADS_ROI", family="ads", question="今天推广花的钱赚回来了吗？")
     assert hits
@@ -221,6 +233,7 @@ _FOLLOWON_METHODOLOGY = (
 )
 
 
+@pytest.mark.skipif(not _CORPUS_AVAILABLE, reason=_CORPUS_REASON)
 def test_methodology_cases_validate_and_stay_priors() -> None:
     from app.services.oci.case_retrieval import load_file_cases, reload_file_cases, retrieve_case_priors
 
@@ -271,6 +284,7 @@ def test_methodology_cases_validate_and_stay_priors() -> None:
     assert all(case.distillation.status != "graduated_to_strategy_memory" for case in load_file_cases())
 
 
+@pytest.mark.skipif(not _CORPUS_AVAILABLE, reason=_CORPUS_REASON)
 def test_manifest_matches_disk_after_rebuild() -> None:
     from app.services.oci.ingest import corpus_dir, rebuild_manifest
 

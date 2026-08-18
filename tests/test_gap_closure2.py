@@ -268,10 +268,12 @@ def test_platform_mobile_reads_intake_submission() -> None:
     seeded = seed_demo(db)
 
     # 无 intake 数据时应明确报错，不再 fallback 到 mock
+    from app.services.connector_mode import ConnectorModeError
+
     try:
         fetch_platform_snapshot("meituan", store_id=seeded["store_id"], mode="mobile")
         raise AssertionError("mobile without intake data should fail explicitly")
-    except ValueError as exc:
+    except (ValueError, ConnectorModeError) as exc:
         assert "没有采集" in str(exc) or "手机连接" in str(exc)
 
     # 写入一条 intake 数据（用 IntakeSubmission 的真实字段）

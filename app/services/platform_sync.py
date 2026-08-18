@@ -136,13 +136,17 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
     meta = _load_meta(connection.meta_json)
     raw_meta = snapshot.raw if isinstance(snapshot.raw, dict) else {}
     source_mode = str(raw_meta.get("source") or "").strip().lower()
-    if source_mode not in {"mobile", "oauth", "http", "mock"}:
+    if source_mode not in {"mobile", "oauth", "http", "mock", "human_paste"}:
         if snapshot.synthetic:
             source_mode = "mock"
         else:
             source_mode = connection.connector_mode or "http"
         if source_mode == "mock" and not snapshot.synthetic:
             source_mode = "http"
+    from app.services.connector_mode import allows_mock
+
+    if source_mode == "mock" and not allows_mock():
+        source_mode = connection.connector_mode if connection.connector_mode not in {"mock", "fixture", "sandbox"} else "http"
     connection.status = "connected"
     connection.external_store_id = snapshot.external_store_id
     connection.connector_mode = source_mode
@@ -216,10 +220,22 @@ def sync_store_platform(
         result["mode"] = use_mode
         return result
     except Exception as exc:  # noqa: BLE001 - surface to API
-        connection.status = "error"
-        connection.last_error = str(exc)
+        from app.services.connector_mode import (
+            AUTH_REQUIRED,
+            PLATFORM_UNAVAILABLE,
+            SCHEMA_CHANGED,
+            classify_connector_failure,
+        )
+
+        classified = classify_connector_failure(exc)
+        connection.status = {
+            AUTH_REQUIRED: "auth_required",
+            SCHEMA_CHANGED: "schema_changed",
+            PLATFORM_UNAVAILABLE: "unavailable",
+        }.get(classified.code, "degraded")
+        connection.last_error = f"{classified.code}: {classified}"
         db.add(connection)
-        raise
+        raise classified from exc
 
 
 # ═══ P2-7: 多平台数据对齐 ═══
@@ -364,10 +380,22 @@ def sync_all_platforms(
                 )
             )
         except Exception as exc:  # noqa: BLE001
-            errors.append({"platform": platform, "error": str(exc)})
+            from app.services.connector_mode import (
+                AUTH_REQUIRED,
+                PLATFORM_UNAVAILABLE,
+                SCHEMA_CHANGED,
+                classify_connector_failure,
+            )
+
+            classified = classify_connector_failure(exc)
+            errors.append({"platform": platform, "error": f"{classified.code}: {classified}"})
             if conn is not None:
-                conn.status = "error"
-                conn.last_error = str(exc)
+                conn.status = {
+                    AUTH_REQUIRED: "auth_required",
+                    SCHEMA_CHANGED: "schema_changed",
+                    PLATFORM_UNAVAILABLE: "unavailable",
+                }.get(classified.code, "degraded")
+                conn.last_error = f"{classified.code}: {classified}"
                 db.add(conn)
 
     if not snapshots:

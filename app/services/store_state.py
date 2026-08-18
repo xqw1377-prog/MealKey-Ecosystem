@@ -691,12 +691,14 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
             .where(ItemFunnelDaily.item_id == item_id)
             .where(ItemFunnelDaily.day >= w.baseline_from)
             .where(ItemFunnelDaily.day <= w.baseline_to)
+            .where(production_funnel_clause(ItemFunnelDaily.data_source))
         )
         o_stmt = (
             select(func.avg(ItemFunnelDaily.ctr).label("ctr"))
             .where(ItemFunnelDaily.item_id == item_id)
             .where(ItemFunnelDaily.day >= w.observe_from)
             .where(ItemFunnelDaily.day <= w.observe_to)
+            .where(production_funnel_clause(ItemFunnelDaily.data_source))
         )
         b_ctr = db.execute(b_stmt).mappings().one()["ctr"]
         o_ctr = db.execute(o_stmt).mappings().one()["ctr"]

@@ -132,6 +132,15 @@ def live_http_writeback_enabled() -> bool:
 
 def writeback_delivery_mode(db: Session | None = None, store_id: str | None = None) -> dict[str, Any]:
     from app.services.platform_write import resolve_connector
+    from app.services.seed_store import is_seed_store
+
+    if db is not None and store_id and is_seed_store(db, store_id):
+        return {
+            "mode": "disabled",
+            "human_paste": False,
+            "platform_writeable": False,
+            "boss_line": "种子店测试只读，不会改到美团。",
+        }
 
     if db is not None and store_id:
         mode = resolve_connector(db, store_id).mode

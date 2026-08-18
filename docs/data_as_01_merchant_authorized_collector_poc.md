@@ -240,8 +240,8 @@ Day 0 先做 reconciliation 基线（门店映射、日期边界、订单状态�
 
 1. 本 POC 合同定型 — **FROZEN**
 2. 更新 `docs/mealkey_commercial_os_v1.md` + 新增 `docs/data_acquisition_strategy_v1.md` — **DONE**
-3. 实现最小测试连接器（1 平台 × 1 授权测试店 × 只读；先争取 `order_count / gross_amount / merchant_revenue / refund_amount`）
-4. 7 天真实测试 + Gate + Reliability Report + 端到端到 Candidate Action
+3. **SEED-STORE-01 Day 0**：明确授权商家 + 官方报表基线。不接通用 Connector。`fetch` 保持 UNAVAILABLE，直到针对**这一家已授权店**单独接线。
+4. Day 1–7 真实只读 Evidence → Reconciliation → Production Truth → StoreState → POIE → ODO → Candidate Action（不执行写回）
 
 ## 下一步（1×1 实现）
 

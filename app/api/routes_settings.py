@@ -499,12 +499,21 @@ def get_platforms():
 
 
 @router.post("/stores/{store_id}/platforms/connect")
-def connect_platform(store_id: str, payload: PlatformConnectRequest, db: Session = Depends(get_db)):
+def connect_platform(
+    store_id: str,
+    payload: PlatformConnectRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     from app.services.connector_mode import ConnectorModeError, assert_mode_allowed
+    from app.services.seed_store import is_seed_store
 
+    enforce_store_access(getattr(request.state, "principal", None), store_id)
     store = _load_store(db, store_id)
     if store is None:
         raise HTTPException(status_code=404, detail="store not found")
+    if is_seed_store(db, store_id) and str(payload.mode or "").strip().lower() in {"mock", "fixture", "sandbox"}:
+        raise HTTPException(status_code=409, detail="种子店禁止 Mock 连接")
     try:
         assert_mode_allowed(payload.mode, explicit=True)
     except ConnectorModeError as exc:

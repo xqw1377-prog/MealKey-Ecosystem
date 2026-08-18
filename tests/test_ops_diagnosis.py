@@ -109,7 +109,7 @@ def test_sku_lifecycle_low_margin() -> None:
     from app.models.entities import ItemFunnelDaily
     item = db.query(MenuItem).filter_by(store_id=sid).first()
     for i in range(7):
-        db.add(ItemFunnelDaily(item_id=item.id, day=date.today()-timedelta(days=i), orders=20))
+        db.add(ItemFunnelDaily(item_id=item.id, day=date.today()-timedelta(days=i), orders=20, data_source="file_import"))
     # 设 food_cost 接近 price → 低利润
     item.food_cost = 26.0  # price=29.9, cost=26 → margin=13%
     db.commit()
@@ -164,7 +164,7 @@ def test_financial_high_ads_ratio() -> None:
     db = _session(); sid = _seed_store(db)
     today = date.today()
     for i in range(3):
-        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=1000, orders=30, ads_spend=200))
+        db.add(ShopFunnelDaily(store_id=sid, day=today-timedelta(days=i), gmv=1000, orders=30, ads_spend=200, data_source="file_import"))
     db.commit()
     r = diagnose_financial_reconciliation(db, sid)
     codes = [f["code"] for f in r["findings"]]

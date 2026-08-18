@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.models.entities import ItemFunnelDaily
 from app.models.ohre import Experiment, Recommendation
+from app.services.truth_resolution import production_funnel_clause
 from app.schemas.agents import AgentKey, AgentMeta
 
 from .constants import AGENT_LABELS
@@ -115,6 +116,7 @@ def _sum_item_window(db: Session, item_id: str, from_day, to_day) -> dict[str, f
         .where(ItemFunnelDaily.item_id == item_id)
         .where(ItemFunnelDaily.day >= from_day)
         .where(ItemFunnelDaily.day <= to_day)
+        .where(production_funnel_clause(ItemFunnelDaily.data_source))
     )
     row = db.execute(stmt).mappings().one()
     return {

@@ -61,6 +61,9 @@ def ingest_reconciliation(
     baseline_only: bool = False,
     auth_status: str = "missing",
     data_source: str | None = None,
+    report_date: str | None = None,
+    raw_report_ref: str | None = None,
+    metric_definitions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     store = db.execute(select(Store).where(Store.id == store_id)).scalar_one_or_none()
     if store is None:
@@ -73,9 +76,23 @@ def ingest_reconciliation(
 
     rows: list[ReconciliationRow] = []
     promoted = 0
-    unknown = unknown_minimal_fields(
-        [k for row in official_rows for k, v in row.items() if v is not None and k != "day"]
+    from app.services.seed_store import build_day0_audit, seed_policy
+
+    policy = seed_policy(db, store_id)
+    day0 = build_day0_audit(
+        store_id=store_id,
+        platform=platform,
+        policy=policy,
+        official_rows=official_rows,
+        report_date=report_date,
+        raw_report_ref=raw_report_ref,
+        metric_definitions=metric_definitions,
     )
+    unknown = list(day0.get("unknown_fields") or [])
+    if not unknown:
+        unknown = unknown_minimal_fields(
+            [k for row in official_rows for k, v in row.items() if v is not None and k != "day"]
+        )
     if baseline_only or not collector_rows:
         for day_key, official in official_by_day.items():
             for metric in ("orders", "gmv", "merchant_revenue", "refund"):
@@ -172,6 +189,7 @@ def ingest_reconciliation(
         rows=rows,
         auth_status=auth_status,
     )
+    run.notes = json.dumps(day0, ensure_ascii=False)
     _persist_run(db, run, rows)
     db.commit()
     return {
@@ -181,6 +199,8 @@ def ingest_reconciliation(
         "entered_storestate": bool(entered) if collector_rows and not baseline_only else False,
         "unknown_fields": unknown,
         "baseline_only": baseline_only or not collector_rows,
+        "day0_verdict": day0["day0_verdict"],
+        "day0_audit": day0,
     }
 
 

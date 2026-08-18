@@ -1,4 +1,5 @@
 """Agent Infrastructure 测试 — Event Log / Action Pipeline / Continuation / External Runtime。"""
+import json
 from datetime import date, timedelta
 
 from sqlalchemy import create_engine
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 import app.models  # noqa: F401
 from app.db.base import Base
 from app.models.entities import Merchant, Store
+from app.models.ohre import Recommendation
 
 
 def _session() -> Session:
@@ -68,19 +70,75 @@ def test_event_log_error() -> None:
 
 
 def test_action_pipeline_stages() -> None:
-    from app.services.action_pipeline import ActionPipeline, PipelineStage, PipelineStatus
-    db = _session(); sid = _seed(db)
-    pipeline = ActionPipeline(db, sid)
-    result = pipeline.execute(
+    """Action Pipeline 公开 contract：PREPARE→VALIDATE→CAPABILITY CHECK→AUTHORIZE→EXECUTE→VERIFY→COMMIT。
+
+    只有 COMMIT 可把 Recommendation 写成 executed。
+    未实现动作在 CAPABILITY CHECK 阻断；需审批动作未审批在 AUTHORIZE 阻断。
+    """
+    from app.services.action_pipeline import (
+        BLOCKED_NOT_IMPLEMENTED,
+        NEED_APPROVAL,
+        PIPELINE_COMMIT_BY,
+        ActionPipelineError,
+        run_recommendation_pipeline,
+    )
+
+    db = _session()
+    sid = _seed(db)
+
+    # 1) not_implemented 动作 → CAPABILITY CHECK 阻断，rec 不得 executed
+    blocked = Recommendation(
+        store_id=sid,
+        scope="store",
+        object_ref=f"store:{sid}",
+        action_type="issue_repurchase_coupon",
+        expected_metric="orders",
+        status="adopted",
+        content_json="{}",
+    )
+    db.add(blocked)
+    db.flush()
+    try:
+        run_recommendation_pipeline(db, blocked, actor="test", approved=True)
+        raise AssertionError("not_implemented 必须在 CAPABILITY CHECK 阻断")
+    except ActionPipelineError as exc:
+        assert exc.code == BLOCKED_NOT_IMPLEMENTED
+        assert exc.stage == "CAPABILITY CHECK"
+        assert blocked.status != "executed"
+
+    # 2) 需审批动作未审批 → AUTHORIZE 阻断
+    ready = Recommendation(
+        store_id=sid,
+        scope="store",
+        object_ref=f"store:{sid}",
         action_type="change_title",
         expected_metric="ctr",
-        expected_lift_pct=5,
+        status="adopted",
+        content_json=json.dumps({"executed_in_system": True}),
     )
-    assert result.status in (PipelineStatus.OBSERVING, PipelineStatus.FAILED)
-    assert len(result.stages_log) >= 6  # 至少6个阶段记录了
-    stage_names = [s["stage"] for s in result.stages_log]
-    assert "PREPARE" in stage_names
-    assert "AUTHORIZE" in stage_names
+    db.add(ready)
+    db.flush()
+    try:
+        run_recommendation_pipeline(db, ready, actor="test", approved=False)
+        raise AssertionError("审批闸必须拦住未审批执行")
+    except ActionPipelineError as exc:
+        assert exc.code == NEED_APPROVAL
+        assert exc.stage == "AUTHORIZE"
+        assert ready.status != "executed"
+
+    # 3) 审批通过 → 走完全部 stage，COMMIT 后唯一允许 executed，并盖 pipeline stamp
+    committed = run_recommendation_pipeline(db, ready, actor="test", approved=True)
+    assert committed["executed"] is True
+    stages = committed["stages"]
+    assert stages[0] == "PREPARE"
+    assert stages[-1] == "COMMIT"
+    assert "AUTHORIZE" in stages
+    assert "VERIFY" in stages
+    assert len(stages) >= 6
+    assert ready.status == "executed"
+    stamp = json.loads(ready.content_json or "{}").get("execution_commit") or {}
+    assert stamp.get("by") == PIPELINE_COMMIT_BY
+    assert stamp.get("verified") is True
     db.close()
 
 

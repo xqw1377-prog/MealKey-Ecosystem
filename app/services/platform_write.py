@@ -181,7 +181,11 @@ def resolve_connector(db: Session, store_id: str) -> ConnectorTarget:
         external_store_id = conn.external_store_id
         requested = (conn.connector_mode or "").strip().lower()
     connector_url = str(settings.platform_connector_url or "").strip()
-    if requested == "human_paste":
+    from app.services.seed_store import is_seed_store
+
+    if is_seed_store(db, store_id):
+        mode = "human_paste"
+    elif requested == "human_paste":
         mode = "human_paste"
     elif requested == "http" and connector_url:
         mode = "http"
@@ -220,6 +224,12 @@ def execute_confirmed_writeback(
     item: ClosedLoopItem,
     pack: dict[str, Any],
 ) -> PlatformWriteResult:
+    from app.services.seed_store import SeedStoreError, assert_writeback_allowed
+
+    try:
+        assert_writeback_allowed(db, store_id)
+    except SeedStoreError as exc:
+        raise WritePermissionError(f"{exc.code}: {exc}") from exc
     check_write_permission(item.action_type, confirmed=True)
     target = resolve_connector(db, store_id)
     if target.mode == "human_paste":

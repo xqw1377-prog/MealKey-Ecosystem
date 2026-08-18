@@ -27,6 +27,7 @@ from app.services.chief_agent import AGENT_TOOLS, answer_as_chief
 from app.services.event_engine import build_operating_events
 from app.services.manager_brief import build_manager_home_brief
 from app.services.mealkey_score import compute_operation_score
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -44,6 +45,8 @@ def test_event_engine_quantifies_hero_sku_loss() -> None:
     """HERO_SKU_SOLD_OUT 应填入 estimated_impact_amount（损失单量）。"""
     db = _session()
     seeded = seed_demo(db)
+    # 事件引擎量化损失依赖 store 级订单 KPI；seed_demo funnel 是 synthetic → 补 authorized_session。
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
     agents = build_store_agents(db, seeded["store_id"])
     assert agents is not None
     # 模拟核心商品在售率低

@@ -147,8 +147,10 @@ def test_workflow_phase_covers_execute_observe_and_review() -> None:
     phase, _ = _workflow_phase(rec, None)
     assert phase == "execute_now"
 
-    rec.status = "executed"
     rec.executed_at = now - timedelta(hours=2)
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(rec, now=rec.executed_at, actor="test", verified=True)
     phase, _ = _workflow_phase(rec, None)
     assert phase == "observe"
 

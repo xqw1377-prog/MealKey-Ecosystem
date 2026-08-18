@@ -6,6 +6,7 @@ from app.api.routes_dev import seed_demo
 from app.db.base import Base
 from app.models.ohre import Recommendation
 from app.services.agents import build_single_agent, create_product_action
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -17,6 +18,9 @@ def _session() -> Session:
 def test_product_agent_builds_health_root_cause_and_decision_path() -> None:
     db = _session()
     seeded = seed_demo(db)
+    # seed_demo funnel 是 synthetic → 被 production_funnel_clause 过滤；product agent 需要 observed funnel，
+    # 补 authorized_session provenance 才能看见 ctr 下滑（Option B / Truth Contract）。
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
 
     result = build_single_agent(db, seeded["store_id"], "product")
 

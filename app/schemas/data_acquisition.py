@@ -230,6 +230,14 @@ class MetricDefinitionVersion(BaseModel):
     fee_policy: list[str] = Field(default_factory=list)
 
 PocVerdict = Literal["PASS", "PASS_WITH_LIMITS", "REWORK", "STOP"]
+Day0Verdict = Literal["DAY0_READY", "DAY0_PASS", "DAY0_PASS_WITH_LIMITS", "DAY0_BLOCKED"]
+
+FACT_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "order_count": ("order_count", "orders"),
+    "gross_gmv": ("gross_gmv", "gmv"),
+    "merchant_revenue": ("merchant_revenue",),
+    "refund_amount": ("refund_amount", "refund"),
+}
 
 AuthStatus = Literal["authorized", "expired", "revoked", "missing"]
 

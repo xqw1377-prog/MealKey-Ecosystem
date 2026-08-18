@@ -64,6 +64,9 @@ from app.models.operating_decision import OperatingDecision  # noqa: F401
 from app.models.action_trace import ActionTrace  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
 from app.models.merchant_understanding import MerchantUnderstandingRecord  # noqa: F401
+from app.services.action_pipeline import install_execution_choke_point
+
+install_execution_choke_point()
 from app.models.runtime_v1 import (  # noqa: F401
     BusinessEventRecord,
     DailyOperatingPlanRecord,

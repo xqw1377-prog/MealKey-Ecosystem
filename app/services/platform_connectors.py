@@ -898,17 +898,31 @@ def fetch_platform_snapshot(
     external_store_id: str | None = None,
     db: "Session | None" = None,
 ) -> PlatformSnapshot:
-    from app.services.connector_mode import assert_mode_allowed
+    from app.services.connector_mode import (
+        PLATFORM_UNAVAILABLE,
+        REAL_FETCH_MODES,
+        ConnectorModeError,
+        allows_mock,
+        assert_mode_allowed,
+        classify_connector_failure,
+    )
 
     resolved = assert_mode_allowed(mode, explicit=True)
     normalized = (platform or "meituan").strip().lower()
-    if resolved == "http":
-        return fetch_http_snapshot(normalized, store_id=store_id, external_store_id=external_store_id)
-    if resolved == "mobile":
-        return fetch_mobile_snapshot(normalized, store_id=store_id, db=db)
-    if resolved == "oauth":
-        return fetch_oauth_snapshot(normalized, store_id=store_id, external_store_id=external_store_id)
-    return fetch_mock_snapshot(normalized, store_name=store_name)
+    try:
+        if resolved == "http":
+            return fetch_http_snapshot(normalized, store_id=store_id, external_store_id=external_store_id)
+        if resolved == "mobile":
+            return fetch_mobile_snapshot(normalized, store_id=store_id, db=db)
+        if resolved == "oauth":
+            return fetch_oauth_snapshot(normalized, store_id=store_id, external_store_id=external_store_id)
+    except Exception as exc:  # noqa: BLE001
+        if resolved in REAL_FETCH_MODES:
+            raise classify_connector_failure(exc) from exc
+        raise
+    if resolved == "mock" and allows_mock():
+        return fetch_mock_snapshot(normalized, store_name=store_name)
+    raise ConnectorModeError(PLATFORM_UNAVAILABLE, f"{resolved} 不是可采集 mode，不能回退到 Mock。")
 
 
 def _load_oauth_meta(store_id: str, platform: str) -> dict[str, Any]:

@@ -1,8 +1,10 @@
-# Phase: EXTERNAL_EVIDENCE_WAIT + PRE-PROD SECURITY BLOCKED
+# Phase: SEED-STORE PILOT READY · NOT PRODUCTION READY
 
-**项目状态：`EXTERNAL_EVIDENCE_WAIT + PRE-PROD SECURITY BLOCKED`（2026-08-18 升级）**  
-**工程主题：`Execution & Truth Convergence`**  
-**进入真店前必须先过：AUTHORITY / EXECUTION / TRUTH 三面 Gate**
+**产品状态：`Seed-store pilot ready，not production ready。`（2026-08-18 冻结）**  
+**工程主题：`Execution & Truth Convergence`（已冻结）**  
+**试点合同：[seed_store_01.md](seed_store_01.md)**
+
+> MealKey 已具备第一家真实种子店的受控只读试点条件，但尚未具备正式生产门店连接条件。
 
 升级理由：2026-08-18 全面审计确认服务能正常启动、171 条路由注册、核心业务端点（manager_brief / dashboard / chief agent ask）工作正常；但安全与迁移层存在真实生产风险。即使明天美团测试店到位，**也不要立刻接真实 OAuth / session**。先过 PRE-PROD-GATE-01。
 
@@ -22,10 +24,40 @@ MT-LIFT 许可明确前，Research Zone **不得碰原始数据**。
 
 ## 当前状态树
 
+**Execution & Truth Convergence 已冻结（2026-08-18）。** 不再新增 Production Invariants，九条已足够。后面任何新能力只问：
+
+> 它是不是绕开了 Execution Choke Point？  
+> 它是不是绕开了 Truth Promotion？
+
+任意一个答案是「是」，就不允许进生产。
+
+```text
+SEED-STORE-01                   FROZEN
+Product                         Seed-store pilot ready, not production ready
+AUTHORITY                       PASS
+EXECUTION                       PASS
+TRUTH                           PASS
+SEED-STORE-GATE                 READY_FOR_DAY0
+DATA-AS-01                      BLOCKED_EXTERNAL
+AuthorizedSessionConnector      UNAVAILABLE until authorized wiring
+Sandbox                         FROZEN
+Growth Writeback                DISABLED
+MT-LIFT Data                    LICENSE_BLOCKED
+```
+
+种子客户门店测试的工程条件已经具备：登记授权店 → 只读 7 天 → 禁止写回 → 禁止 Mock → 提交官方报表做 Day 0 对账基线。  
+**真实 Session 采集仍等美团明确授权店**，在此之前 fetch 必须保持 UNAVAILABLE。
+
+种子店测试入口：`POST /v1/stores/{id}/seed-store/open`（记录授权人）→ `GET /v1/stores/{id}/seed-store`（就绪检查）→ `POST /v1/stores/{id}/data-acquisition/official-report`（Day 0 基线，不进 StoreState）。
+
+下一次打开采集主线的事件，只应该是：**美团明确授权测试店到位 → 真实 Session fetch。**  
+店到了也不跳过 Gate，也不把 Mock 或未对账报表晋升为生产事实。
+
 ```text
 EXTERNAL_EVIDENCE_WAIT + PRE-PROD SECURITY BLOCKED
         │
-        ├── DATA-AS-01        FROZEN
+        ├── SEED-STORE-GATE   READY_FOR_DAY0
+        ├── DATA-AS-01        BLOCKED_EXTERNAL
         ├── PLATFORM-SB-01    FROZEN
         ├── Growth Writeback  DISABLED
         ├── MT-LIFT Data      LICENSE_BLOCKED
@@ -37,7 +69,7 @@ EXTERNAL_EVIDENCE_WAIT + PRE-PROD SECURITY BLOCKED
               ├─ 4 Production JWT_SECRET mandatory   PASS  生产缺 JWT_SECRET → SystemExit
               ├─ 5 OAuth tokens credential_ref only  PASS  credential_ref + 回归测试
               ├─ 6 Test DB isolated                 PASS  conftest 临时 SQLite + atexit 清理
-              ├─ 7 Synthetic ≠ Truth                PASS  seed_demo 幂等 + mock lineage
+              ├─ 7 Synthetic ≠ Truth                PASS  seed_demo synthetic 标注 + authorized_session fixture + Truth 边界回归
               └─ 8 Attribution/verification no-swallow PASS  closed_loop + 护栏不再 pass
                     │
                     └──（旁路）PROD-DB-HARDENING-01  ⏸ 不阻塞真店，阻塞正式生产部署
@@ -52,13 +84,23 @@ EXTERNAL_EVIDENCE_WAIT + PRE-PROD SECURITY BLOCKED
 **一旦要进入真实店，启动顺序必须是：**
 
 ```text
-PRE-PROD-GATE-01 全 8 条 PASS
-        ↓
-美团 × 授权测试店（READ_ONLY / 7 days / MINIMUM PII / 禁止写回）
-        ↓
+AUTHORITY
+所有 store / secret 权限 fail closed
+        ↓ PASS
+
+EXECUTION
+所有状态改变经过中央 Action Pipeline
+        ↓ PASS
+
+TRUTH
+所有生产事实经过 Truth Promotion
+Mock / Synthetic / Unknown Source 不可见
+        ↓ PASS
+
+DATA-AS-01
 Day 0 reconciliation
         ↓
-Day 1–7
+Day 1–7 production evidence
 ```
 
 而不是：拿到店 → 先接起来 → 后面再修这些问题。
@@ -72,9 +114,9 @@ Day 1–7
 
 | Gate | 核心问题 | 本轮已收口 |
 | --- | --- | --- |
-| **AUTHORITY** | 谁可以操作什么店/秘密 | 既有 P0-1..P0-4 |
-| **EXECUTION** | 什么东西可以被称为 Executed | `POST /recommendations/{id}/execute` 只能进 Action Pipeline；`not_implemented` → `BLOCKED_NOT_IMPLEMENTED`；禁止 handler 自写 `executed` |
-| **TRUTH** | 什么数据可以进入 Business Truth | 生产禁止 Mock 且无 fallback；空 `data_source` → `LEGACY_UNKNOWN_SOURCE`，不进生产 Truth |
+| **AUTHORITY** | 谁可以操作什么店/秘密 | 既有 P0-1..P0-4；所有 store / secret 权限 fail closed |
+| **EXECUTION** | 什么东西可以被称为 Executed | `commit_recommendation_executed` 是唯一产生 `executed` 的入口；HTTP 200 / Tool success / 写回受理 ≠ EXECUTED；未 Verify 不得 Commit |
+| **TRUTH** | 什么数据可以进入 Business Truth | Truth Promotion 失败只留 Evidence；`NULL / "" / synthetic / mock / invalid reconciliation` 在 StoreState / POIE / ranking / Memory **查询不可见**；真实 Connector 失败不得回退 Mock |
 
 ## PRE-PROD-GATE-01
 
@@ -128,10 +170,13 @@ Day 1–7
 
 ### P0-7　Synthetic/mock → impossible to become production Truth
 
-- **原则**：Invariant #1。
-- **状态**：🟢 PASS（已修复）。[`app/api/routes_dev.py`](../app/api/routes_dev.py) `seed_demo` 改为先查后插（幂等）：demo store 已存在则返回现有 ids，不重复创建。审计前：非幂等，第二次 seed 必触发 UNIQUE 约束。mock source lineage 规则 enforce（`production_funnel_clause` 排除 `synthetic/mock/None`）。
-- **必须改动**：`seed_demo` 改为先查后插（幂等）；确认 mock source lineage 规则 enforce（mock 必须带 `source=synthetic` 且不可覆盖已对账 real `ShopFunnelDaily`）。
-- **验收**：`POST /dev/seed` 连调两次不报错；mock 数据无法覆盖 real source 的 ShopFunnelDaily。
+- **原则**：Invariant #1（Synthetic 永远不是 Truth）。Demo 不伪装真实来源；生产归因测试自行构造满足 Truth Contract 的 fixture。
+- **状态**：🟢 PASS（已修复 + Truth 边界回归锁死）。
+  - [`app/api/routes_dev.py`](../app/api/routes_dev.py) `seed_demo` 幂等（先查后插）；funnel 行（Shop + Item）显式标 `data_source="synthetic"` —— NULL=历史未知来源，synthetic=明确假数据，两者都不进 `production_funnel_clause`，但 synthetic 审计语义更清楚：demo 永不伪装成 `platform_export`。
+  - [`tests/truth_fixtures.py`](../tests/truth_fixtures.py) `seed_reconciled_authorized_session_funnel`：归因/诊断测试用它构造 `data_source="authorized_session"`（经授权会话、已对账）的 observed funnel，数值口径与 `seed_demo` 一致，仅 provenance 不同。
+  - [`tests/test_truth_boundary.py`](../tests/test_truth_boundary.py) 4 场景把「No Provenance = No Truth」锁死为回归：None/synthetic 排除（funnel_missing）；authorized_session observed 可见；valid production provenance 归因执行落终态。
+  - 10 处依赖 demo funnel 的旧测试（3 attribution + daily_job core_items + 诊断/增长/事件/facts 5 处 + product agent 1 处）改用 authorized_session fixture，不再吃 demo 的 synthetic 数据。
+- **验收**：`POST /dev/seed` 连续两次幂等；`production_funnel_clause` 拒绝 None/synthetic，接受 authorized_session；Truth 边界 4 场景全绿。
 
 ### P0-8　Attribution / verification failure → never silently swallowed
 
@@ -145,10 +190,12 @@ Day 1–7
   1. 注入 `evaluate_experiment` 未预期异常 → `result="unknown"` + `FAILED_VERIFICATION` marker + AgentEventLog error。
   2. 利润护栏故障 → positive 降级 neutral + warning。
   3. CPC 护栏故障 → warning（不静默）。
-- **全量回归**：579 passed / 9 pre-existing failures（**均非 P0-8 回归**）：
-  - 4 处 funnel/provenance（`production_funnel_clause` 排除 `seed_demo` 的 `data_source=None` → `funnel_missing`），属 P0-6/P0-7 之外的测试 fixture provenance 缺口，不阻塞 Gate 8 条。
-  - 1 处 `test_agent_infra` ImportError（`ActionPipeline` 旧符号）。
-  - 4 处 `test_oci_whitelist` 缺外部数据文件 `/Users/xinquanwang/data/cases/corpus_manifest.json`。
+- **全量回归**（2026-08-18 Option B 闭合后）：595 passed / 4 skipped / 0 failed（仅剩 1 处 `test_memory_rerank` collection error，旁路登记为 KNOWN_TEST_DEBT）：
+  - ~~1 处 `test_agent_infra` ImportError~~ → ✅ 已收：测试改到真实公开 contract `run_recommendation_pipeline`（PREPARE→VALIDATE→CAPABILITY CHECK→AUTHORIZE→EXECUTE→VERIFY→COMMIT），删除旧 `ActionPipeline`/`PipelineStage`/`PipelineStatus` 符号漂移。
+  - ~~4 处 `test_oci_whitelist` 缺外部语料~~ → ✅ 已收：外部 OCI 语料（`data/cases/`，curated ≥33 文件，不在 repo）缺失时 4 条语料依赖测试 explicit SKIP（reason：external OCI corpus unavailable），不伪造语料、不假装通过。
+  - ~~1 处 `test_product_agent` failed~~ → ✅ 已收：补 `seed_reconciled_authorized_session_funnel`（与已修 9 处同根：`seed_demo` synthetic 被过滤 → 补 `authorized_session` observed funnel），`diagnosis_stage` 恢复 `ctr`。Option B（Synthetic 永不是 Truth）真正闭合：所有依赖 observed funnel 的测试均走 authorized_session fixture。
+  - 之前的 9 处 + 本次 1 处 funnel/provenance 失败已由 P0-7 全部清零。
+  - **KNOWN_TEST_DEBT — non-blocking for SEED-STORE Day 0**：`test_memory_rerank` 1 collection error（`StrategyMemorySnapshot` 未定义，缺 import），与 Execution & Truth Convergence / Option B / 种子店 Gate 均无关；不为本轮扩，留档待下一轮独立处理。
 
 ### PASS 条件
 

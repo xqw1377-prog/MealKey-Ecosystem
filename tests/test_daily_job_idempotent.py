@@ -7,6 +7,7 @@ from app.db.base import Base
 from app.models.ohre import Observation, Recommendation
 from app.services.daily_job import run_daily_job
 from app.services.store_state import build_store_state
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -43,6 +44,9 @@ def test_daily_job_is_idempotent_for_same_observe_window() -> None:
 def test_core_item_uses_real_menu_name() -> None:
     db = _session()
     seeded = seed_demo(db)
+    # core_items 由 production_funnel_clause 过滤，只看 authorized_session provenance。
+    # seed_demo 的 synthetic funnel 不被看 → 必须补 authorized_session observed 数据。
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
     state = build_store_state(db, seeded["store_id"], days=7)
     assert state is not None
     assert state.core_items

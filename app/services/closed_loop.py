@@ -399,7 +399,9 @@ def mark_loop_executed(
         rec.adopted_at = now
     from app.services.action_pipeline import commit_recommendation_executed
 
-    commit_recommendation_executed(rec, now=now, actor="closed_loop", domain={"loop_id": item.id})
+    commit_recommendation_executed(
+        rec, now=now, actor="closed_loop", domain={"loop_id": item.id}, verified=True
+    )
     experiment = _ensure_experiment(db, rec, item, executor=item.executor)
     item.experiment_id = experiment.id
     _sync_work_thread(db, item, pack)

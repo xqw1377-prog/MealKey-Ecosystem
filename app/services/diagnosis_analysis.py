@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import ReviewFact, ShopFunnelDaily
+from app.services.truth_resolution import production_funnel_clause
 from app.schemas.agents import (
     DiagnosisComparison,
     DiagnosisMarketComparison,
@@ -48,6 +49,7 @@ def _aggregate_shop(db: Session, store_id: str, from_day: date, to_day: date) ->
         .where(ShopFunnelDaily.store_id == store_id)
         .where(ShopFunnelDaily.day >= from_day)
         .where(ShopFunnelDaily.day <= to_day)
+        .where(production_funnel_clause(ShopFunnelDaily.data_source))
     ).mappings().one()
     if not row["days"]:
         return None

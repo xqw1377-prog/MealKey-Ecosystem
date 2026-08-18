@@ -18,6 +18,10 @@ ALLOWED_MODES = frozenset({"mock", "http", "mobile", "oauth", "human_paste"})
 
 CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
 PLATFORM_UNAVAILABLE = "PLATFORM_UNAVAILABLE"
+AUTH_REQUIRED = "AUTH_REQUIRED"
+SCHEMA_CHANGED = "SCHEMA_CHANGED"
+DEGRADED = "DEGRADED"
+REAL_FETCH_MODES = frozenset({"http", "mobile", "oauth"})
 
 
 class ConnectorModeError(Exception):
@@ -41,6 +45,19 @@ def assert_mode_allowed(mode: str | None, *, explicit: bool = False) -> str:
     if requested in MOCK_MODES and not allows_mock():
         raise ConnectorModeError(CONFIGURATION_ERROR, "生产环境禁止 Mock，且绝不能 fallback 到 Mock。")
     return requested
+
+
+def classify_connector_failure(exc: BaseException) -> ConnectorModeError:
+    """真实 Connector 失败只能降级为 UNAVAILABLE / AUTH_REQUIRED / SCHEMA_CHANGED，绝不转 Mock。"""
+    if isinstance(exc, ConnectorModeError):
+        return exc
+    text = str(exc)
+    lowered = text.lower()
+    if any(token in lowered for token in ("401", "403", "unauthorized", "auth_required", "token")):
+        return ConnectorModeError(AUTH_REQUIRED, text)
+    if any(token in lowered for token in ("schema", "422", "unprocessable")):
+        return ConnectorModeError(SCHEMA_CHANGED, text)
+    return ConnectorModeError(PLATFORM_UNAVAILABLE, text)
 
 
 def resolve_fetch_mode(*, requested: str | None = None, connection_mode: str | None = None) -> str:

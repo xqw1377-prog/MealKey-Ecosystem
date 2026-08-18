@@ -305,7 +305,9 @@ def auto_execute_recommendations(
         from app.services.action_pipeline import commit_recommendation_executed
 
         rec.adopted_at = rec.adopted_at or now
-        commit_recommendation_executed(rec, now=now, actor="auto_pilot", domain={"mode": mode, "applied": True})
+        commit_recommendation_executed(
+            rec, now=now, actor="auto_pilot", domain={"mode": mode, "applied": True}, verified=True
+        )
         # 审计：谁执行的 + 当时的仲裁依据
         import json as _json
 

@@ -163,7 +163,7 @@ class ShopFunnelDaily(Base):
     aov: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Provenance — 每条数据有来源,区分真实导入 vs mock/合成
-    data_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="platform_export")
+    data_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     ads_spend: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 当日推广费
 
 

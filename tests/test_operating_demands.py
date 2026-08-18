@@ -14,6 +14,7 @@ from app.services.operating_demands.golden import featured_cases, smoke_cases
 from app.services.operating_demands.playbooks import run_playbook
 from app.services.operating_demands.router import match_demand
 from app.services.operating_demands.runner import facts_from_store_state, open_demand_loop
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 from app.services.poie.intent import handle_user_intent
 
 
@@ -201,6 +202,8 @@ def test_chain_multi_platform_is_blocked_without_platform_truth() -> None:
 def test_runner_extracts_nested_store_state_facts() -> None:
     db = _session()
     seeded = seed_demo(db)
+    # facts 里的 profit/take_home_rate 来自 store 级 funnel KPI；synthetic 不被看 → 补 authorized_session。
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
     from app.services.store_state import build_store_state
 
     state = build_store_state(db, seeded["store_id"], days=7)

@@ -22,6 +22,7 @@ from app.schemas.workspace import AskRequest, DocumentSyncRequest, IntakeSubmitR
 from app.services.agents import build_store_agents
 from app.services.chat_attachments import build_attachment_context, parse_upload_files
 from app.services.daily_job import run_daily_job
+from app.services.truth_resolution import production_funnel_clause
 from app.services.document_alignment import build_document_alignment, preview_document_alignment
 from app.services.store_state import build_store_state
 
@@ -543,7 +544,10 @@ def _serialize_experiment(exp: Experiment, recommendation_lookup: dict[str, Reco
 def _recent_trend(db: Session, store_id: str, days: int = 14) -> list[dict[str, Any]]:
     stmt = (
         select(ShopFunnelDaily)
-        .where(ShopFunnelDaily.store_id == store_id)
+        .where(
+            ShopFunnelDaily.store_id == store_id,
+            production_funnel_clause(ShopFunnelDaily.data_source),
+        )
         .order_by(ShopFunnelDaily.day.desc())
         .limit(days)
     )

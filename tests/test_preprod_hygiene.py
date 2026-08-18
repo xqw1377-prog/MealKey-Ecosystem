@@ -323,7 +323,14 @@ def test_recommendation_execute_is_pipeline_choke_point() -> None:
 
 def test_production_never_falls_back_to_mock(monkeypatch) -> None:
     from app.core.config import settings
-    from app.services.connector_mode import CONFIGURATION_ERROR, ConnectorModeError, assert_mode_allowed
+    from app.services.connector_mode import (
+        AUTH_REQUIRED,
+        CONFIGURATION_ERROR,
+        PLATFORM_UNAVAILABLE,
+        ConnectorModeError,
+        assert_mode_allowed,
+    )
+    from app.services.platform_connectors import fetch_platform_snapshot
 
     monkeypatch.setattr(settings, "app_env", "production")
     try:
@@ -331,3 +338,82 @@ def test_production_never_falls_back_to_mock(monkeypatch) -> None:
         raise AssertionError("prod must forbid mock")
     except ConnectorModeError as exc:
         assert exc.code == CONFIGURATION_ERROR
+
+    try:
+        fetch_platform_snapshot("meituan", store_id="s1", mode="human_paste")
+        raise AssertionError("human_paste must not fall through to mock")
+    except ConnectorModeError as exc:
+        assert exc.code == PLATFORM_UNAVAILABLE
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("401 unauthorized token expired")
+
+    monkeypatch.setattr("app.services.platform_connectors.fetch_http_snapshot", boom)
+    try:
+        fetch_platform_snapshot("meituan", store_id="s1", mode="http")
+        raise AssertionError("real connector failure must fail closed")
+    except ConnectorModeError as exc:
+        assert exc.code == AUTH_REQUIRED
+
+
+def test_only_pipeline_can_create_executed_semantics() -> None:
+    from pathlib import Path
+
+    from app.services.action_pipeline import ActionPipelineError, commit_recommendation_executed
+
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    offenders: list[str] = []
+    for path in app_root.rglob("*.py"):
+        if path.name == "action_pipeline.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if 'rec.status = "executed"' in text or "rec.status = 'executed'" in text:
+            offenders.append(str(path.relative_to(app_root.parent)))
+    assert offenders == []
+
+    rec = Recommendation(
+        store_id="store-choke",
+        scope="store",
+        object_ref="store:store-choke",
+        action_type="change_title",
+        expected_metric="orders",
+        status="adopted",
+        content_json="{}",
+    )
+    try:
+        rec.status = "executed"
+        raise AssertionError("direct assignment must be forbidden")
+    except RuntimeError as exc:
+        assert "choke point" in str(exc)
+    try:
+        commit_recommendation_executed(rec, actor="test", verified=False)
+        raise AssertionError("unverified commit must be refused")
+    except ActionPipelineError as exc:
+        assert exc.code == "VERIFY_REQUIRED"
+        assert rec.status != "executed"
+    commit_recommendation_executed(rec, actor="test", verified=True)
+    assert rec.status == "executed"
+
+
+def test_unprovenanced_funnel_is_query_invisible_not_just_low_confidence() -> None:
+    from app.services.diagnosis_analysis import _aggregate_shop
+    from app.services.ops_diagnosis import _recent_funnel
+
+    db = _session()
+    store = _store(db)
+    day = date.today() - timedelta(days=1)
+    db.add(
+        ShopFunnelDaily(
+            store_id=store.id,
+            day=day,
+            orders=77,
+            gmv=7700,
+            data_source=None,
+        )
+    )
+    db.commit()
+    assert _recent_funnel(db, store.id) == []
+    assert _aggregate_shop(db, store.id, day, day) is None
+    state = build_store_state(db, store.id, days=7)
+    assert state is not None
+    assert (state.kpis["orders"].observed_value or 0) != 77

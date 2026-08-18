@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.business_facts import OpsMetricDaily
 from app.models.entities import ReviewFact, ShopFunnelDaily
+from app.services.truth_resolution import production_funnel_clause
 
 
 def _recent_ops(db: Session, store_id: str, days: int = 7) -> list[OpsMetricDaily]:
@@ -33,7 +34,11 @@ def _recent_funnel(db: Session, store_id: str, days: int = 7) -> list[ShopFunnel
     return list(
         db.execute(
             select(ShopFunnelDaily)
-            .where(ShopFunnelDaily.store_id == store_id, ShopFunnelDaily.day >= cutoff)
+            .where(
+                ShopFunnelDaily.store_id == store_id,
+                ShopFunnelDaily.day >= cutoff,
+                production_funnel_clause(ShopFunnelDaily.data_source),
+            )
             .order_by(ShopFunnelDaily.day)
         ).scalars()
     )
@@ -214,7 +219,11 @@ def diagnose_sku_lifecycle(db: Session, store_id: str) -> dict[str, Any]:
         funnel = list(
             db.execute(
                 select(ItemFunnelDaily)
-                .where(ItemFunnelDaily.item_id == item.id, ItemFunnelDaily.day >= cutoff)
+                .where(
+                    ItemFunnelDaily.item_id == item.id,
+                    ItemFunnelDaily.day >= cutoff,
+                    production_funnel_clause(ItemFunnelDaily.data_source),
+                )
                 .order_by(ItemFunnelDaily.day)
             ).scalars()
         )

@@ -226,8 +226,10 @@ def test_experiment_binds_sku_and_skips_without_funnel() -> None:
 
     rec = db.get(Recommendation, exp.recommendation_id)
     rec.expected_metric = "ctr"
-    rec.status = "executed"
     rec.executed_at = datetime.now(timezone.utc) - timedelta(days=3)
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(rec, now=rec.executed_at, actor="test", verified=True)
     db.add(rec)
     db.commit()
     outcome = evaluate_experiment(db, exp, days=7)

@@ -140,7 +140,19 @@ POST /recommendations/{id}/execute
 缺审批 → `NEED_APPROVAL`  
 平台不可用 → `PLATFORM_UNAVAILABLE`
 
-没有任何 handler 可以自己写 `executed=true`。唯一写入点是 `commit_recommendation_executed`。
+没有任何 handler 可以自己写 `executed=true`。唯一写入点是 `commit_recommendation_executed`。  
+这必须是代码事实：SQLAlchemy 监听禁止对已有 Recommendation 直接赋 `executed`；`verified=True` 是 COMMIT 的前置条件。
+
+验收语义：
+
+```text
+HTTP 200 ≠ EXECUTED
+Tool success ≠ EXECUTED
+Platform write accepted ≠ EXECUTED
+Read Back / Verify 通过后才能 Commit
+```
+
+未来新增 Agent、人工确认、批任务、Platform Executor，都不能直接更新 recommendation/action 状态。
 
 ## 8. Production never falls back to Mock
 
@@ -154,24 +166,46 @@ PROD:        mock = forbidden
 禁止：`真实 Connector 不可用 → MOCK`。
 
 生产启动若发现 `connector_mode == mock`：禁用该 Connector，并记 `CONFIGURATION_ERROR`。  
+运行时真实 Connector 失败也只能 fail-closed，不能为了「页面别空着」切 Mock：
+
+```text
+HEALTHY
+→ DEGRADED
+→ AUTH_REQUIRED / SCHEMA_CHANGED / UNAVAILABLE
+```
+
+禁止：
+
+```text
+REAL failed → MOCK
+```
+
 Sandbox 可以继续存在，但必须锁在 `Synthetic + Sandbox/Test`，不得与 production evidence 共用晋升路径。
 
 ## 9. No Provenance = No Truth
 
 禁止给空 `data_source` 补默认值（不要猜 `platform` / `platform_export`）。
 
+`NULL / "" / synthetic / mock / invalid reconciliation` 不是「权重最低的候选 Truth」，而是生产查询不可见：
+
 ```text
-data_source is NULL / ""
-        ↓
-LEGACY_UNKNOWN_SOURCE
-        ↓
-confidence = 0
-        ↓
-excluded_from_production_truth = true
+Evidence
+   ↓
+Truth Promotion
+   ├─ PASS → Production Fact
+   └─ FAIL → Evidence Only
 ```
 
-历史无来源数据可以展示、调试、人工核查。  
-不能驱动 POIE、影响生产排序、进入 Strategy Memory。  
+禁止：
+
+```text
+所有数据都进 StoreState
+↓
+靠每个模块自己判断 confidence
+```
+
+`production_funnel_clause` 必须在 StoreState / POIE / ranking / Strategy Memory 入口直接排除。  
+历史无来源数据可以留在 Evidence 表里供人工核查，但不能驱动生产事实。  
 等真正重新对账以后，再升格。
 
 ## 与阶段状态的关系

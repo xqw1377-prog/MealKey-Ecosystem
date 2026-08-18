@@ -882,6 +882,7 @@ def apply_product_action(
         now=now,
         actor="product_agent",
         domain={"applied": True, "mode": "in_system", "action": action_type},
+        verified=True,
     )
 
     from app.services.thread_engine import ensure_thread_for_action

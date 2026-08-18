@@ -33,6 +33,7 @@ from app.services.closed_loop import (
     tick_observing_loops,
 )
 from app.services.execution_pack import build_execution_pack
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -70,7 +71,7 @@ def _now_flow() -> dict:
 def _executed_orders_experiment(db: Session, store_id: str, item_id: str) -> Experiment:
     """构造一条已过观察窗、item 级、metric=orders、baseline=10 的 pending 实验。
 
-    seed_demo 在 observe 窗（最近 7 天）每天 orders=8 → observed≈56 → lift≈+460%（positive）。
+    authorized_session observe 窗每天 orders=8 → observed≈56 → lift≈+460%（positive）。
     """
     rec = Recommendation(
         store_id=store_id,
@@ -188,6 +189,7 @@ def test_p0_8_evaluate_failure_marks_failed_verification(monkeypatch) -> None:
 def test_p0_8_profit_guardrail_failure_downgrades_positive(monkeypatch, caplog) -> None:
     db = _session()
     seeded = seed_demo(db)
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
     exp = _executed_orders_experiment(db, seeded["store_id"], seeded["item_id"])
 
     monkeypatch.setattr(
@@ -212,6 +214,7 @@ def test_p0_8_profit_guardrail_failure_downgrades_positive(monkeypatch, caplog) 
 def test_p0_8_cpc_guardrail_failure_emits_warning(monkeypatch, caplog) -> None:
     db = _session()
     seeded = seed_demo(db)
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
     exp = _executed_orders_experiment(db, seeded["store_id"], seeded["item_id"])
 
     # profit=None：利润护栏不触发异常；让 CPC 护栏的 AdSpendDaily 查询抛错

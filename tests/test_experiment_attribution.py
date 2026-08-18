@@ -21,6 +21,7 @@ from app.services.experiment_attribution import (
     attribute_store_experiments,
     evaluate_experiment,
 )
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -69,6 +70,9 @@ def test_pending_experiment_past_window_gets_evaluated() -> None:
     seeded = seed_demo(db)
     store_id = seeded["store_id"]
     item_id = seeded["item_id"]
+    # 归因测试自行构造满足 Truth Contract 的 observed 数据（authorized_session provenance）。
+    # seed_demo 的 funnel 是 synthetic，被 production_funnel_clause 拒绝 → 不参与归因。
+    seed_reconciled_authorized_session_funnel(db, store_id, item_id)
 
     rec = _create_executed_recommendation(db, store_id, item_id)
     exp = db.execute(
@@ -150,6 +154,7 @@ def test_strategy_memory_upserted_after_attribution() -> None:
     seeded = seed_demo(db)
     store_id = seeded["store_id"]
     item_id = seeded["item_id"]
+    seed_reconciled_authorized_session_funnel(db, store_id, item_id)
 
     rec = _create_executed_recommendation(db, store_id, item_id)
     exp = db.execute(
@@ -175,6 +180,7 @@ def test_force_revaluate_overwrites_terminal_state() -> None:
     seeded = seed_demo(db)
     store_id = seeded["store_id"]
     item_id = seeded["item_id"]
+    seed_reconciled_authorized_session_funnel(db, store_id, item_id)
 
     rec = _create_executed_recommendation(db, store_id, item_id)
     exp = db.execute(

@@ -983,6 +983,7 @@ def apply_menu_patch(db: Session, store_id: str, patch_index: int, days: int = 7
         now=now,
         actor="menu_agent",
         domain={"applied": True, "mode": "in_system"},
+        verified=True,
     )
 
     # 绑定 work_thread_id (Track A: 同一件事贯穿三栏)
@@ -1091,6 +1092,7 @@ def apply_menu_cleanup(db: Session, store_id: str, candidate_index: int, days: i
         now=now,
         actor="menu_agent",
         domain={"applied": True, "mode": "in_system"},
+        verified=True,
     )
 
     from app.services.thread_engine import ensure_thread_for_action
@@ -1214,6 +1216,7 @@ def apply_menu_bundle(db: Session, store_id: str, opportunity_index: int, days: 
         now=now,
         actor="menu_agent",
         domain={"applied": True, "mode": "in_system"},
+        verified=True,
     )
 
     from app.services.thread_engine import ensure_thread_for_action

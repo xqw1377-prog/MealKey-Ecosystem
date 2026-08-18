@@ -6,6 +6,7 @@ from app.api.routes_dev import seed_demo
 from app.db.base import Base
 from app.models.ohre import Experiment, Recommendation
 from app.services.agents import build_single_agent
+from truth_fixtures import seed_reconciled_authorized_session_funnel
 
 
 def _session() -> Session:
@@ -17,6 +18,8 @@ def _session() -> Session:
 def test_growth_agent_ranks_cross_agent_opportunities_with_explainable_score() -> None:
     db = _session()
     seeded = seed_demo(db)
+    # 跨 agent 机会池依赖完整 store KPI；seed_demo funnel 是 synthetic → 补 authorized_session。
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
 
     result = build_single_agent(db, seeded["store_id"], "growth")
 
@@ -61,6 +64,7 @@ def test_growth_agent_builds_adaptive_seven_day_single_variable_plan() -> None:
 def test_growth_agent_learns_from_experiment_result() -> None:
     db = _session()
     seeded = seed_demo(db)
+    seed_reconciled_authorized_session_funnel(db, seeded["store_id"], seeded["item_id"])
     initial = build_single_agent(db, seeded["store_id"], "growth")
     assert initial is not None
     recommendation_id = initial["selected_opportunity"]["recommendation_id"]

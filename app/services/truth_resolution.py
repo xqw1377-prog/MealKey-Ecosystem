@@ -10,7 +10,9 @@ from typing import Iterable, Optional
 
 from sqlalchemy import and_
 
-NEVER_PRODUCTION_TRUTH = frozenset({"synthetic", "mock", "fixture", "sandbox", "legacy_unknown_source"})
+NEVER_PRODUCTION_TRUTH = frozenset(
+    {"synthetic", "mock", "fixture", "sandbox", "legacy_unknown_source", "invalid_reconciliation"}
+)
 LEGACY_UNKNOWN_SOURCE = "legacy_unknown_source"
 
 SOURCE_PRIORITY: dict[str, int] = {
@@ -28,6 +30,7 @@ SOURCE_PRIORITY: dict[str, int] = {
     "mock": 0,
     "fixture": 0,
     "sandbox": 0,
+    "invalid_reconciliation": 0,
 }
 
 SOURCE_CONFIDENCE: dict[str, float] = {
@@ -45,6 +48,7 @@ SOURCE_CONFIDENCE: dict[str, float] = {
     "mock": 0.0,
     "fixture": 0.0,
     "sandbox": 0.0,
+    "invalid_reconciliation": 0.0,
 }
 
 
@@ -64,6 +68,7 @@ def normalize_source(raw: Optional[str]) -> str:
         "mock": "mock",
         "fixture": "fixture",
         "sandbox": "sandbox",
+        "invalid_reconciliation": "invalid_reconciliation",
     }
     if not key:
         return LEGACY_UNKNOWN_SOURCE

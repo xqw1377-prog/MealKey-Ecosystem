@@ -92,6 +92,7 @@ def _item_metric_value(
         .where(ItemFunnelDaily.item_id == item_id)
         .where(ItemFunnelDaily.day >= from_day)
         .where(ItemFunnelDaily.day <= to_day)
+        .where(production_funnel_clause(ItemFunnelDaily.data_source))
     )
     row = db.execute(stmt).mappings().one()
     orders = float(row["orders"] or 0)

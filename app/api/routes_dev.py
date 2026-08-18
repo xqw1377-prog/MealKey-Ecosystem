@@ -187,6 +187,9 @@ def seed_demo(db: Session = Depends(get_db)):
 
     today = date.today()
     # build 14 days: last 7 is worse (ctr down)
+    # PRE-PROD-GATE-01 P0-7 / Truth Contract：demo funnel 数据显式标 "synthetic"。
+    # NULL=历史未知来源；synthetic=明确知道是假数据。两者都不进 production_funnel_clause，
+    # 但 synthetic 审计语义更清楚：demo 永不伪装成真实平台导出，永不成为 production Truth。
     for i in range(14):
         d = today - timedelta(days=i + 1)
         in_last7 = i < 7
@@ -205,6 +208,7 @@ def seed_demo(db: Session = Depends(get_db)):
                 orders=orders,
                 gmv=gmv,
                 aov=32.0,
+                data_source="synthetic",
             )
         )
 
@@ -219,6 +223,7 @@ def seed_demo(db: Session = Depends(get_db)):
                 gmv=gmv,
                 ctr=(visits / impressions) if impressions else None,
                 cvr=(orders / visits) if visits else None,
+                data_source="synthetic",
             )
         )
 

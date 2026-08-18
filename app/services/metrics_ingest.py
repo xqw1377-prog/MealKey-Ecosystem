@@ -48,6 +48,7 @@ def ingest_funnel_csv(db: Session, store_id: str, text: str) -> dict[str, Any]:
                 visits=row.get("visits"),
                 orders=row.get("orders"),
                 gmv=row.get("gmv"),
+                data_source="file_import",
             )
         )
         written += 1

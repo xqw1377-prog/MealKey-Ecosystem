@@ -39,6 +39,9 @@ PLATFORM_WRITE_BLOCKLIST = {
     "run_platform_promo",
     "menu_cleanup",
     "batch_reply_negative_reviews",
+    "issue_repurchase_coupon",
+    "reactivate_dormant_customer",
+    "referral_share",
 }
 
 ORDINARY_REVIEW_MIN_RATING = 4.0
@@ -177,20 +180,17 @@ def resolve_connector(db: Session, store_id: str) -> ConnectorTarget:
         platform = (conn.platform or "meituan").strip().lower() or "meituan"
         external_store_id = conn.external_store_id
         requested = (conn.connector_mode or "").strip().lower()
+    connector_url = str(settings.platform_connector_url or "").strip()
     if requested == "human_paste":
         mode = "human_paste"
-    elif requested == "http" and str(settings.platform_connector_url or "").strip():
+    elif requested == "http" and connector_url:
         mode = "http"
-    elif requested == "mock" and settings.is_dev:
-        mode = "mock"
+    elif requested == "mock":
+        mode = "mock" if settings.is_dev else "human_paste"
+    elif connector_url:
+        mode = "http"
     else:
-        mode = _env_writeback_mode()
-        if mode == "http" and requested == "http":
-            mode = "http"
-        elif not str(settings.platform_connector_url or "").strip() and not settings.is_dev:
-            mode = "human_paste"
-        elif requested == "http" and not str(settings.platform_connector_url or "").strip():
-            mode = "human_paste" if not settings.is_dev else "mock"
+        mode = "mock" if settings.is_dev else "human_paste"
     return ConnectorTarget(
         platform=platform,
         mode=mode,

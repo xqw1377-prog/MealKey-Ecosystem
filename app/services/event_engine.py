@@ -209,6 +209,32 @@ def build_operating_events(state: StoreState, *, generated_at: Optional[datetime
                 evidence=[f"ctr_delta={ctr.delta_pct:.1f}%"],
             )
         )
+    orders = state.kpis.get("orders")
+    if orders and orders.delta_pct is not None and orders.delta_pct <= -8:
+        severity = "high" if orders.delta_pct <= -15 else "medium"
+        loss = _estimate_metric_loss(state, orders.delta_pct, "订单")
+        impact_text = "午餐订单连续弱于基线"
+        if loss:
+            impact_text = f"订单较基线{orders.delta_pct:.1f}%，预计今日少约{int(loss)}单"
+        events.append(
+            OperatingEvent(
+                id=_eid(),
+                store_id=state.store.store_id,
+                event_type="ORDER_DROP",
+                title="订单下降",
+                detail=f"订单较基线 {orders.delta_pct:.1f}%",
+                severity=severity,
+                detected_at=now,
+                affected_metric="orders",
+                estimated_impact=impact_text,
+                estimated_impact_amount=loss,
+                confidence=0.84,
+                recommended_agent="diagnosis",
+                manager_decision=_decide(severity, 0.84),
+                evidence=[f"orders_delta={orders.delta_pct:.1f}%"],
+            )
+        )
+
     if cvr and cvr.delta_pct is not None and cvr.delta_pct <= -5:
         severity = "high" if cvr.delta_pct <= -10 else "medium"
         loss = _estimate_metric_loss(state, cvr.delta_pct, "转化率")

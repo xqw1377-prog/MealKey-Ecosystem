@@ -7,6 +7,11 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.truth_resolution import (
+    confidence_for_sources,
+    production_funnel_clause,
+)
+
 from app.models.business_facts import AdSpendDaily, OpsMetricDaily
 from app.models.entities import (
     CompetitorMenuItem,
@@ -75,8 +80,23 @@ def _sum_shop(db: Session, store_id: str, from_day: date, to_day: date):
         .where(ShopFunnelDaily.store_id == store_id)
         .where(ShopFunnelDaily.day >= from_day)
         .where(ShopFunnelDaily.day <= to_day)
+        .where(production_funnel_clause(ShopFunnelDaily.data_source))
     )
     return db.execute(stmt).mappings().one()
+
+
+def _funnel_sources(db: Session, store_id: str, from_day: date, to_day: date) -> list[str]:
+    rows = db.execute(
+        select(ShopFunnelDaily.data_source)
+        .where(ShopFunnelDaily.store_id == store_id)
+        .where(ShopFunnelDaily.day >= from_day)
+        .where(ShopFunnelDaily.day <= to_day)
+        .where(production_funnel_clause(ShopFunnelDaily.data_source))
+        .distinct()
+    ).scalars().all()
+    from app.services.truth_resolution import LEGACY_UNKNOWN_SOURCE, normalize_source
+
+    return [normalize_source(source) if source is not None else LEGACY_UNKNOWN_SOURCE for source in rows]
 
 
 def _sum_ads(db: Session, store_id: str, from_day: date, to_day: date) -> Optional[float]:
@@ -544,6 +564,8 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
     w = _calc_window(days=days)
     base = _sum_shop(db, store_id, w.baseline_from, w.baseline_to)
     obs = _sum_shop(db, store_id, w.observe_from, w.observe_to)
+    funnel_sources = _funnel_sources(db, store_id, w.baseline_from, w.observe_to)
+    funnel_confidence = confidence_for_sources(funnel_sources)
 
     baseline_gmv = float(base["gmv"] or 0)
     observed_gmv = float(obs["gmv"] or 0)
@@ -553,6 +575,11 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
     observed_impr = float(obs["impressions"] or 0)
     baseline_vis = float(base["visits"] or 0)
     observed_vis = float(obs["visits"] or 0)
+    if funnel_confidence <= 0:
+        baseline_gmv = observed_gmv = 0.0
+        baseline_orders = observed_orders = 0.0
+        baseline_impr = observed_impr = 0.0
+        baseline_vis = observed_vis = 0.0
 
     order_obs_gmv, order_obs_count = _sum_orders(db, store_id, w.observe_from, w.observe_to)
     order_base_gmv, order_base_count = _sum_orders(db, store_id, w.baseline_from, w.baseline_to)
@@ -563,6 +590,7 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
         if order_base_count is not None:
             baseline_gmv = float(order_base_gmv or 0)
             baseline_orders = float(order_base_count or 0)
+        funnel_confidence = max(funnel_confidence, 0.75)
 
     ads_from_table = _sum_ads(db, store_id, w.observe_from, w.observe_to)
     ads_base_table = _sum_ads(db, store_id, w.baseline_from, w.baseline_to)
@@ -587,41 +615,42 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
     baseline_cvr = (baseline_orders / baseline_vis) if baseline_vis else None
     observed_cvr = (observed_orders / observed_vis) if observed_vis else None
 
+    kpi_confidence = funnel_confidence
     kpis = {
         "gmv": DeltaMetric(
-            delta_pct=_delta_pct(baseline_gmv, observed_gmv),
+            delta_pct=_delta_pct(baseline_gmv, observed_gmv) if kpi_confidence > 0 else None,
             value=observed_gmv,
             baseline_value=baseline_gmv,
             observed_value=observed_gmv,
-            confidence=0.9,
+            confidence=kpi_confidence if kpi_confidence > 0 else 0.0,
         ),
         "orders": DeltaMetric(
-            delta_pct=_delta_pct(baseline_orders, observed_orders),
+            delta_pct=_delta_pct(baseline_orders, observed_orders) if kpi_confidence > 0 else None,
             value=observed_orders,
             baseline_value=baseline_orders,
             observed_value=observed_orders,
-            confidence=0.9,
+            confidence=kpi_confidence if kpi_confidence > 0 else 0.0,
         ),
         "impressions": DeltaMetric(
-            delta_pct=_delta_pct(baseline_impr, observed_impr),
+            delta_pct=_delta_pct(baseline_impr, observed_impr) if kpi_confidence > 0 else None,
             value=observed_impr,
             baseline_value=baseline_impr,
             observed_value=observed_impr,
-            confidence=0.7,
+            confidence=min(0.7, kpi_confidence) if kpi_confidence > 0 else 0.0,
         ),
         "ctr": DeltaMetric(
-            delta_pct=_delta_pct(baseline_ctr, observed_ctr),
+            delta_pct=_delta_pct(baseline_ctr, observed_ctr) if kpi_confidence > 0 else None,
             value=observed_ctr,
             baseline_value=baseline_ctr,
             observed_value=observed_ctr,
-            confidence=0.8,
+            confidence=min(0.8, kpi_confidence) if kpi_confidence > 0 else 0.0,
         ),
         "cvr": DeltaMetric(
-            delta_pct=_delta_pct(baseline_cvr, observed_cvr),
+            delta_pct=_delta_pct(baseline_cvr, observed_cvr) if kpi_confidence > 0 else None,
             value=observed_cvr,
             baseline_value=baseline_cvr,
             observed_value=observed_cvr,
-            confidence=0.8,
+            confidence=min(0.8, kpi_confidence) if kpi_confidence > 0 else 0.0,
         ),
     }
     observed_rating = _avg_rating(db, store_id, w.observe_from, w.observe_to)
@@ -642,6 +671,7 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
         .where(MenuItem.store_id == store_id)
         .where(ItemFunnelDaily.day >= w.observe_from)
         .where(ItemFunnelDaily.day <= w.observe_to)
+        .where(production_funnel_clause(ItemFunnelDaily.data_source))
         .group_by(ItemFunnelDaily.item_id)
         .order_by(func.sum(ItemFunnelDaily.orders).desc())
         .limit(5)
@@ -753,6 +783,7 @@ def build_store_state(db: Session, store_id: str, days: int = 7) -> Optional[Sto
             ShopFunnelDaily.store_id == store_id,
             ShopFunnelDaily.day >= w.observe_from,
             ShopFunnelDaily.day <= w.observe_to,
+            production_funnel_clause(ShopFunnelDaily.data_source),
         )
     ).scalar() or 0
     review_count = db.execute(

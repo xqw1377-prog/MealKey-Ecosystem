@@ -1,9 +1,10 @@
 """平台官网公开政策与促销采集 API。不接商家后台 OAuth。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from app.core.security import enforce_store_access
 from app.db.session import get_db
 from app.models.entities import Store
 from app.services.platform_intel import (
@@ -48,9 +49,11 @@ def get_platform_intel(
 
 @router.post("/platform-intel/collect")
 def post_collect_platform_intel(
+    request: Request,
     store_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    enforce_store_access(getattr(request.state, "principal", None), store_id)
     if store_id and db.get(Store, store_id) is None:
         raise HTTPException(status_code=404, detail="store not found")
     return collect_official_intel(db, store_id=store_id)

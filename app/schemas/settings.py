@@ -45,7 +45,7 @@ class SystemSettingsUpdate(BaseModel):
 
 class PlatformConnectRequest(BaseModel):
     platform: str = Field(min_length=2, max_length=64)
-    mode: Literal["mock", "http", "mobile"] = "mock"
+    mode: Literal["mock", "http", "mobile"] = "http"
     run_daily_job: bool = True
 
 
@@ -61,6 +61,38 @@ class OwnerProfileUpdate(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=32)
     role: Optional[str] = Field(default="老板", max_length=40)
     avatar_data_url: Optional[str] = Field(default=None, max_length=240_000)
+
+
+class EnterpriseSettingsUpdate(BaseModel):
+    """企业主体资料；品牌字段会写到当前门店所属品牌。"""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    brand_name: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    cuisine_type: Optional[str] = Field(default=None, max_length=100)
+    location: Optional[str] = Field(default=None, max_length=200)
+    business_hours: Optional[str] = Field(default=None, max_length=200)
+
+
+class BrandCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    cuisine_type: Optional[str] = Field(default=None, max_length=100)
+    business_hours: Optional[str] = Field(default=None, max_length=200)
+
+
+class BrandSettingsUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    category: Optional[str] = Field(default=None, max_length=100)
+    cuisine_type: Optional[str] = Field(default=None, max_length=100)
+    business_hours: Optional[str] = Field(default=None, max_length=200)
+
+
+class OrgStoreCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    city: Optional[str] = Field(default=None, max_length=120)
+    area: Optional[str] = Field(default=None, max_length=120)
+    address: Optional[str] = Field(default=None, max_length=300)
 
 
 class StoreOpsRosterUpdate(BaseModel):

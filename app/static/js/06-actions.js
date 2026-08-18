@@ -360,17 +360,38 @@ function fillOwnerProfileForm(profile) {
   }
 }
 
+function fillEnterpriseSettingsForm(enterprise) {
+  const data = enterprise || {};
+  const nameInput = qs("#enterpriseNameInput");
+  const locationInput = qs("#enterpriseLocationInput");
+  const hint = qs("#enterpriseOrgHint");
+  if (nameInput) nameInput.value = data.name || "";
+  if (locationInput) locationInput.value = data.location || "";
+  const org = data.org || {};
+  if (hint) {
+    const brands = Number(org.brand_count || (org.brands || []).length || 0);
+    const stores = Number(org.store_count || 0);
+    hint.textContent = brands || stores ? `当前 ${brands} 个品牌 · ${stores} 家门店` : "还没有品牌和门店";
+  }
+  renderOrgBrandList(org);
+}
+
 function openOwnerProfileModal(options = {}) {
   const modal = qs("#ownerProfileModal");
   if (!modal) return;
   const focus = options.focus || "";
   fillOwnerProfileForm(state.ownerProfile || state.settingsOverview?.owner || {});
+  fillEnterpriseSettingsForm(state.enterpriseSettings || state.settingsOverview?.enterprise || {});
   modal.classList.add("open");
   modal.setAttribute("aria-hidden", "false");
-  if (focus !== "wallet") qs("#ownerDisplayNameInput")?.focus();
+  if (focus !== "wallet" && focus !== "org") qs("#ownerDisplayNameInput")?.focus();
+  loadEnterpriseSettings().catch(() => null);
   loadOwnerBillBoard().then(() => {
     if (focus === "wallet") {
       qs("#ownerBillWallet")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    if (focus === "org") {
+      qs("#orgBrandPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   });
 }
@@ -455,6 +476,228 @@ async function saveOwnerProfile(event) {
       saveBtn.textContent = original;
     }
   }
+}
+
+async function saveEnterpriseSettings(event) {
+  event?.preventDefault?.();
+  if (!state.currentStoreId) {
+    notifyError("请先选择门店");
+    return;
+  }
+  const saveBtn = qs("#enterpriseSaveBtn");
+  const original = saveBtn?.textContent || "保存企业信息";
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "保存中…";
+  }
+  try {
+    const payload = await fetchJson(`/settings/stores/${state.currentStoreId}/enterprise`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: (qs("#enterpriseNameInput")?.value || "").trim() || undefined,
+        location: (qs("#enterpriseLocationInput")?.value || "").trim(),
+      }),
+    });
+    applyEnterpriseSettings(payload);
+    notifySuccess("企业主体已更新");
+  } catch (error) {
+    notifyError(`保存失败：${error.message}`);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = original;
+    }
+  }
+}
+
+function applyEnterpriseSettings(payload) {
+  state.enterpriseSettings = payload;
+  if (state.settingsOverview) state.settingsOverview.enterprise = payload;
+  fillEnterpriseSettingsForm(payload);
+}
+
+function renderOrgBrandList(org) {
+  const list = qs("#orgBrandList");
+  if (!list) return;
+  const brands = org?.brands || [];
+  if (!brands.length) {
+    list.innerHTML = `<p class="profile-store-hint">先新增一个品牌，再在品牌下开门店。</p>`;
+    return;
+  }
+  list.innerHTML = brands
+    .map((brand) => {
+      const stores = brand.stores || [];
+      const storeRows = stores.length
+        ? stores
+            .map((store) => {
+              const place = [store.city, store.area].filter(Boolean).join(" · ");
+              const label = place ? `${store.name} · ${place}` : store.name;
+              if (store.current) {
+                return `<li><span>${escapeHtml(label)}</span><span class="is-current">当前</span></li>`;
+              }
+              return `<li><span>${escapeHtml(label)}</span><button type="button" data-switch-store="${escapeHtml(store.store_id)}">切换</button></li>`;
+            })
+            .join("")
+        : `<li><span class="is-current">这个品牌还没有门店</span></li>`;
+      return `
+        <article class="profile-brand-card" data-brand-id="${escapeHtml(brand.brand_id)}">
+          <div class="profile-brand-card-head">
+            <strong>${escapeHtml(brand.name || "未命名品牌")}</strong>
+            <span>${Number(brand.store_count || stores.length)} 家门店</span>
+          </div>
+          <form class="profile-form" data-brand-form="${escapeHtml(brand.brand_id)}">
+            <label class="profile-field">
+              <span>品牌名</span>
+              <input name="name" type="text" maxlength="200" value="${escapeHtml(brand.name || "")}" required />
+            </label>
+            <div class="profile-field-row">
+              <label class="profile-field">
+                <span>品类</span>
+                <input name="category" type="text" maxlength="100" value="${escapeHtml(brand.category || "")}" />
+              </label>
+              <label class="profile-field">
+                <span>菜系</span>
+                <input name="cuisine_type" type="text" maxlength="100" value="${escapeHtml(brand.cuisine_type || "")}" />
+              </label>
+            </div>
+            <label class="profile-field">
+              <span>营业时间</span>
+              <input name="business_hours" type="text" maxlength="200" value="${escapeHtml(brand.business_hours || "")}" placeholder="例如：10:00-22:00" />
+            </label>
+            <div class="profile-modal-actions">
+              <button type="submit" class="topbar-button">保存品牌</button>
+            </div>
+          </form>
+          <ul class="profile-store-list">${storeRows}</ul>
+          <form class="profile-org-add-store" data-add-store="${escapeHtml(brand.brand_id)}">
+            <div class="profile-field-row">
+              <label class="profile-field">
+                <span>新门店名</span>
+                <input name="name" type="text" maxlength="200" placeholder="例如：静安一店" required />
+              </label>
+              <label class="profile-field">
+                <span>城市</span>
+                <input name="city" type="text" maxlength="120" placeholder="上海" />
+              </label>
+            </div>
+            <label class="profile-field">
+              <span>商圈 / 地址</span>
+              <input name="area" type="text" maxlength="120" placeholder="静安寺" />
+            </label>
+            <div class="profile-modal-actions">
+              <button type="submit" class="topbar-button primary">在此品牌下开门店</button>
+            </div>
+          </form>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function saveOrgBrand(event) {
+  event?.preventDefault?.();
+  const form = event?.currentTarget;
+  const brandId = form?.dataset?.brandForm;
+  if (!state.currentStoreId || !brandId) return;
+  const body = {
+    name: (form.querySelector("[name=name]")?.value || "").trim(),
+    category: (form.querySelector("[name=category]")?.value || "").trim(),
+    cuisine_type: (form.querySelector("[name=cuisine_type]")?.value || "").trim(),
+    business_hours: (form.querySelector("[name=business_hours]")?.value || "").trim(),
+  };
+  if (!body.name) {
+    notifyError("品牌名不能为空");
+    return;
+  }
+  try {
+    const payload = await fetchJson(`/settings/stores/${state.currentStoreId}/brands/${brandId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    applyEnterpriseSettings(payload);
+    if (typeof loadStores === "function") await loadStores();
+    notifySuccess("品牌已更新");
+  } catch (error) {
+    notifyError(`保存失败：${error.message}`);
+  }
+}
+
+async function createOrgBrand(event) {
+  event?.preventDefault?.();
+  if (!state.currentStoreId) {
+    notifyError("请先选择门店");
+    return;
+  }
+  const saveBtn = qs("#orgNewBrandSaveBtn");
+  const original = saveBtn?.textContent || "新增品牌";
+  const name = (qs("#orgNewBrandName")?.value || "").trim();
+  if (!name) {
+    notifyError("品牌名不能为空");
+    return;
+  }
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "创建中…";
+  }
+  try {
+    const payload = await fetchJson(`/settings/stores/${state.currentStoreId}/brands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        category: (qs("#orgNewBrandCategory")?.value || "").trim(),
+        cuisine_type: (qs("#orgNewBrandCuisine")?.value || "").trim(),
+      }),
+    });
+    applyEnterpriseSettings(payload);
+    if (qs("#orgNewBrandForm")) qs("#orgNewBrandForm").reset();
+    notifySuccess("品牌已创建");
+  } catch (error) {
+    notifyError(`创建失败：${error.message}`);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = original;
+    }
+  }
+}
+
+async function createOrgStore(event) {
+  event?.preventDefault?.();
+  const form = event?.currentTarget;
+  const brandId = form?.dataset?.addStore;
+  if (!state.currentStoreId || !brandId) return;
+  const name = (form.querySelector("[name=name]")?.value || "").trim();
+  if (!name) {
+    notifyError("门店名不能为空");
+    return;
+  }
+  try {
+    const payload = await fetchJson(`/settings/stores/${state.currentStoreId}/brands/${brandId}/stores`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        city: (form.querySelector("[name=city]")?.value || "").trim(),
+        area: (form.querySelector("[name=area]")?.value || "").trim(),
+      }),
+    });
+    applyEnterpriseSettings(payload);
+    if (typeof loadStores === "function") await loadStores();
+    form.reset();
+    notifySuccess("门店已创建");
+  } catch (error) {
+    notifyError(`创建失败：${error.message}`);
+  }
+}
+
+async function switchOrgStore(storeId) {
+  if (!storeId || storeId === state.currentStoreId) return;
+  await loadDashboard(storeId);
+  fillEnterpriseSettingsForm(state.enterpriseSettings || state.settingsOverview?.enterprise || {});
+  loadEnterpriseSettings().catch(() => null);
 }
 
 function formatBillYuan(value) {

@@ -3072,6 +3072,109 @@ body.view-home .mk-decision-card .mk-cta {
   font-weight: 650;
 }
 
+.profile-enterprise {
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mk-line);
+}
+
+.profile-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-section-head strong {
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--mk-ink);
+}
+
+.profile-section-head span {
+  font-size: 12px;
+  color: var(--mk-muted);
+}
+
+.profile-org {
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mk-line);
+  display: grid;
+  gap: 14px;
+}
+
+.profile-org-new {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(240, 235, 227, 0.45);
+}
+
+.profile-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.profile-brand-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--mk-line);
+  background: #fff;
+}
+
+.profile-brand-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.profile-brand-card-head strong {
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.profile-brand-card-head span {
+  font-size: 12px;
+  color: var(--mk-muted);
+}
+
+.profile-store-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-store-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.profile-store-list button {
+  border: 0;
+  background: none;
+  color: var(--mk-ink);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 0;
+}
+
+.profile-store-list .is-current {
+  color: var(--mk-muted);
+}
+
+.profile-org-add-store {
+  display: grid;
+  gap: 8px;
+}
+
 .profile-modal-actions {
   display: flex;
   justify-content: flex-end;

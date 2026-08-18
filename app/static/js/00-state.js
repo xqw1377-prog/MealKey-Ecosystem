@@ -45,6 +45,7 @@ const state = {
   understanding: null,
   menuDeepDiagnosis: null,
   ownerProfile: null,
+  enterpriseSettings: null,
   pendingAvatarDataUrl: null,
   commercialBoard: null,
   lastAuthError: null,  // { type: "network"|"token_expired"|"server", message: "..." }

@@ -870,12 +870,19 @@ def apply_product_action(
             },
             ensure_ascii=False,
         ),
-        status="executed",
+        status="adopted",
         adopted_at=now,
-        executed_at=now,
     )
     db.add(recommendation)
     db.flush()
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(
+        recommendation,
+        now=now,
+        actor="product_agent",
+        domain={"applied": True, "mode": "in_system", "action": action_type},
+    )
 
     from app.services.thread_engine import ensure_thread_for_action
     thread = ensure_thread_for_action(db, store_id, f"商品优化：{action_type}")

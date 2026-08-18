@@ -9,6 +9,7 @@ from app.models.entities import (  # noqa: F401
     Menu,
     MenuItem,
     MenuItemVersion,
+    Brand,
     Merchant,
     OrderFact,
     OrderItemFact,
@@ -34,6 +35,11 @@ from app.models.business_facts import (  # noqa: F401
     CampaignRecord,
     OpsMetricDaily,
     ReviewImport,
+)
+from app.models.data_acquisition import (  # noqa: F401
+    CollectorRunRecord,
+    IncrementalResultRecord,
+    ReconciliationRecord,
 )
 from app.models.closed_loop import ClosedLoopItem  # noqa: F401
 from app.models.platform_intel import PlatformIntelItem, PlatformIntelRun  # noqa: F401

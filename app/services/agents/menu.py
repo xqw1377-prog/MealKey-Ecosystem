@@ -971,12 +971,19 @@ def apply_menu_patch(db: Session, store_id: str, patch_index: int, days: int = 7
             },
             ensure_ascii=False,
         ),
-        status="executed",
+        status="adopted",
         adopted_at=now,
-        executed_at=now,
     )
     db.add(recommendation)
     db.flush()
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(
+        recommendation,
+        now=now,
+        actor="menu_agent",
+        domain={"applied": True, "mode": "in_system"},
+    )
 
     # 绑定 work_thread_id (Track A: 同一件事贯穿三栏)
     from app.services.thread_engine import ensure_thread_for_action
@@ -1072,12 +1079,19 @@ def apply_menu_cleanup(db: Session, store_id: str, candidate_index: int, days: i
             },
             ensure_ascii=False,
         ),
-        status="executed",
+        status="adopted",
         adopted_at=now,
-        executed_at=now,
     )
     db.add(recommendation)
     db.flush()
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(
+        recommendation,
+        now=now,
+        actor="menu_agent",
+        domain={"applied": True, "mode": "in_system"},
+    )
 
     from app.services.thread_engine import ensure_thread_for_action
     thread = ensure_thread_for_action(db, store_id, "菜单清理优化")
@@ -1188,12 +1202,19 @@ def apply_menu_bundle(db: Session, store_id: str, opportunity_index: int, days: 
             },
             ensure_ascii=False,
         ),
-        status="executed",
+        status="adopted",
         adopted_at=now,
-        executed_at=now,
     )
     db.add(recommendation)
     db.flush()
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(
+        recommendation,
+        now=now,
+        actor="menu_agent",
+        domain={"applied": True, "mode": "in_system"},
+    )
 
     from app.services.thread_engine import ensure_thread_for_action
     thread = ensure_thread_for_action(db, store_id, "新增套餐优化")

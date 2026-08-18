@@ -44,6 +44,7 @@ class StrategyMemoryItem(BaseModel):
     avoid_when: Optional[str] = None
     source_experiment_id: Optional[str] = None
     confidence: float = 0.6
+    evidence_kind: Literal["observed", "attributed", "incremental"] = "observed"
     created_at: datetime
 
 

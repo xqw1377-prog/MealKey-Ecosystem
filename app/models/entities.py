@@ -25,13 +25,31 @@ class Merchant(IdMixin, TimestampMixin, Base):
 
     business_hours: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
+    brands: Mapped[list["Brand"]] = relationship(back_populates="merchant")
     stores: Mapped[list["Store"]] = relationship(back_populates="merchant")
+
+
+class Brand(IdMixin, TimestampMixin, Base):
+    """企业主体下的品牌。一个企业可有多个品牌，一个品牌可有多家门店。"""
+
+    __tablename__ = "brand"
+
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchant.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cuisine_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    business_hours: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+
+    merchant: Mapped["Merchant"] = relationship(back_populates="brands")
+    stores: Mapped[list["Store"]] = relationship(back_populates="brand")
 
 
 class Store(IdMixin, TimestampMixin, Base):
     __tablename__ = "store"
 
     merchant_id: Mapped[str] = mapped_column(ForeignKey("merchant.id"))
+    brand_id: Mapped[Optional[str]] = mapped_column(ForeignKey("brand.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
 
     address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
@@ -50,6 +68,7 @@ class Store(IdMixin, TimestampMixin, Base):
     primary_pain: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     merchant: Mapped["Merchant"] = relationship(back_populates="stores")
+    brand: Mapped[Optional["Brand"]] = relationship(back_populates="stores")
     items: Mapped[list["MenuItem"]] = relationship(back_populates="store")
 
 

@@ -16,6 +16,7 @@ from app.models.entities import (
     Menu,
     MenuItem,
     MenuItemVersion,
+    Brand,
     Merchant,
     ShopFunnelDaily,
     Store,
@@ -30,15 +31,41 @@ def seed_demo(db: Session = Depends(get_db)):
     """
     创建一套最小 Demo 数据，方便你立刻跑通：
     StoreState -> daily_job -> OHRE + recommendation
+
+    幂等：若 demo store 已存在则直接返回现有 ids，不重复创建（PRE-PROD-GATE-01 P0-7）。
     """
     if not settings.is_dev:
         raise HTTPException(status_code=403, detail="seed is only available in development")
-    merchant = Merchant(name="老王牛肉饭", brand_name=None, category="快餐", cuisine_type="盖饭")
+
+    existing_store = db.execute(
+        select(Store).where(Store.platform_store_key == "demo_store_key")
+    ).scalar_one_or_none()
+    if existing_store is not None:
+        existing_item = db.execute(
+            select(MenuItem).where(MenuItem.store_id == existing_store.id).limit(1)
+        ).scalar_one_or_none()
+        return {
+            "merchant_id": existing_store.merchant_id,
+            "store_id": existing_store.id,
+            "item_id": existing_item.id if existing_item else None,
+        }
+
+    merchant = Merchant(name="老王牛肉饭", brand_name="老王牛肉饭", category="快餐", cuisine_type="盖饭")
     db.add(merchant)
+    db.flush()
+    brand = Brand(
+        merchant_id=merchant.id,
+        name="老王牛肉饭",
+        category="快餐",
+        cuisine_type="盖饭",
+        status="active",
+    )
+    db.add(brand)
     db.flush()
 
     store = Store(
         merchant_id=merchant.id,
+        brand_id=brand.id,
         name="老王牛肉饭·国贸店",
         city="北京",
         area="国贸",
@@ -239,6 +266,16 @@ def attribute_store_experiments(
         "skipped": sum(1 for o in outcomes if o.skipped),
         "results": [o.__dict__ for o in outcomes],
     }
+
+
+@router.post("/sandbox/golden-path")
+def sandbox_golden_path(world_id: str = "sb01", db: Session = Depends(get_db)):
+    """PLATFORM-SB-01：Twin 改标题黄金路径。结果永远 L0，不进生产 Truth。"""
+    if not settings.is_dev:
+        raise HTTPException(status_code=403, detail="sandbox is only available in development")
+    from app.services.sandbox_golden_path import run_title_golden_path
+
+    return run_title_golden_path(db, world_id=world_id)
 
 
 @router.post("/attribute-experiments")

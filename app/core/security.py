@@ -10,6 +10,7 @@ from datetime import timedelta
 from typing import Any, Optional
 
 import jwt
+from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.time import utc_now
@@ -34,8 +35,9 @@ class AuthPrincipal:
     def can_access_store(self, store_id: str) -> bool:
         if self.is_admin:
             return True
+        # operator 必须 fail closed：空 store_ids = 无授权门店 = 拒绝，不得 fail open。
         if not self.store_ids:
-            return True
+            return False
         return store_id in self.store_ids
 
 
@@ -43,7 +45,10 @@ def jwt_secret() -> str:
     secret = (settings.jwt_secret or "").strip()
     if secret:
         return secret
-    # 开发回退：派生自 api_token，避免未配置时完全不可用
+    # 生产环境由 main.py 守卫强制要求独立 JWT_SECRET，不会走到这里。
+    # 此回退仅 dev 可用：派生自 api_token，避免本地未配置时完全不可用。
+    if not settings.is_dev:
+        raise RuntimeError("JWT_SECRET must be configured in production (main.py guard should prevent this)")
     base = (settings.api_token or "mealky-dev").encode("utf-8")
     return hashlib.sha256(b"mealky-jwt|" + base).hexdigest()
 
@@ -115,3 +120,17 @@ def verify_api_token(token: str) -> bool:
     if not expected or not token:
         return False
     return hmac.compare_digest(token, expected)
+
+
+def enforce_store_access(principal: "AuthPrincipal | None", store_id: str | None) -> "AuthPrincipal":
+    """在 handler 层强制校验门店作用域，不只依赖 URL 正则中间件。
+
+    store_id 经 Query 传递的路由不命中 api_auth_guard 的 path 正则，必须在 handler/dependency
+    层显式校验，否则 operator 可跨租户读取他店数据或为他店发起 OAuth。
+    store_id 为空（None/""）时不校验（跨店聚合查询）。
+    """
+    if principal is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    if store_id and not principal.can_access_store(store_id):
+        raise HTTPException(status_code=403, detail="store out of scope")
+    return principal

@@ -68,6 +68,51 @@ ACTION_REGISTRY: dict[str, dict[str, Any]] = {
         "required_context": ["appeal_reason", "evidence_bundle"],
         "input_schema": ["appeal_template", "evidence_needed", "copy_text", "steps"],
     },
+    "issue_repurchase_coupon": {
+        "action_type": "COUPON",
+        "subject_type": "segment",
+        "risk_level": "HIGH",
+        "requires_approval": True,
+        "execution_method": "not_implemented",
+        "rollback_method": "expire_coupon",
+        "success_metric": "incremental_profit",
+        "default_observation_window": 168,
+        "required_context": ["segment", "treatment_cost"],
+        "input_schema": ["copy_text", "steps"],
+        "applicable_channels": ["MEITUAN", "TAOBAO_FLASH", "JD", "OWNED_CHANNEL"],
+        "attribution_method": "incremental_if_control_else_observed",
+        "profit_guard": True,
+    },
+    "reactivate_dormant_customer": {
+        "action_type": "REACTIVATE_DORMANT_CUSTOMER",
+        "subject_type": "segment",
+        "risk_level": "HIGH",
+        "requires_approval": True,
+        "execution_method": "not_implemented",
+        "rollback_method": "stop_outreach",
+        "success_metric": "incremental_orders",
+        "default_observation_window": 168,
+        "required_context": ["segment", "treatment_cost"],
+        "input_schema": ["copy_text", "steps"],
+        "applicable_channels": ["MEITUAN", "OWNED_CHANNEL"],
+        "attribution_method": "incremental_if_control_else_observed",
+        "profit_guard": True,
+    },
+    "referral_share": {
+        "action_type": "REFERRAL",
+        "subject_type": "store",
+        "risk_level": "MEDIUM",
+        "requires_approval": True,
+        "execution_method": "not_implemented",
+        "rollback_method": "disable_link",
+        "success_metric": "paid_store",
+        "default_observation_window": 720,
+        "required_context": ["share_id"],
+        "input_schema": ["copy_text"],
+        "applicable_channels": ["OWNED_CHANNEL"],
+        "attribution_method": "referral_graph",
+        "profit_guard": True,
+    },
     "ops_hint": {
         "action_type": "OPS_HINT",
         "subject_type": "store",
@@ -122,6 +167,13 @@ def build_action_spec(
         "risk_level": definition["risk_level"],
         "requires_approval": bool(definition["requires_approval"]),
         "execution_method": definition["execution_method"],
+        "execution_capability": (
+            "NOT_IMPLEMENTED"
+            if definition["execution_method"] == "not_implemented"
+            else "IMPLEMENTED"
+            if definition["execution_method"] == "platform_or_human"
+            else "MANUAL_ONLY"
+        ),
         "rollback_method": definition["rollback_method"],
         "required_context": list(definition["required_context"]),
         "input_schema": list(definition["input_schema"]),
@@ -139,4 +191,7 @@ def build_action_spec(
         "executor_modes": ["human", "platform"]
         if definition["execution_method"] == "platform_or_human"
         else ["human"],
+        "applicable_channels": list(definition.get("applicable_channels") or []),
+        "attribution_method": definition.get("attribution_method") or "observed_before_after",
+        "profit_guard": bool(definition.get("profit_guard")),
     }

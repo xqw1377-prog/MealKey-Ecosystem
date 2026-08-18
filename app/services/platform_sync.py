@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.entities import ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, ReviewFact, ShopFunnelDaily, Store
 from app.models.settings import PlatformConnection
+from app.services.truth_resolution import may_write_funnel_truth
 from app.services.platform_connectors import (
     PlatformDailyMetric,
     PlatformMenuItem,
@@ -69,6 +70,12 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
 
     metric_days = 0
     for metric in snapshot.daily_metrics:
+        incoming_source = "synthetic" if snapshot.synthetic else "platform_sync"
+        existing = db.execute(
+            select(ShopFunnelDaily).where(ShopFunnelDaily.store_id == store.id, ShopFunnelDaily.day == metric.day)
+        ).scalar_one_or_none()
+        if existing is not None and not may_write_funnel_truth(existing.data_source, incoming_source):
+            continue
         db.merge(
             ShopFunnelDaily(
                 store_id=store.id,
@@ -80,7 +87,7 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
                 orders=metric.orders,
                 gmv=metric.gmv,
                 aov=metric.aov,
-                data_source="synthetic" if snapshot.synthetic else "platform_sync",
+                data_source=incoming_source,
             )
         )
         metric_days += 1
@@ -130,7 +137,12 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
     raw_meta = snapshot.raw if isinstance(snapshot.raw, dict) else {}
     source_mode = str(raw_meta.get("source") or "").strip().lower()
     if source_mode not in {"mobile", "oauth", "http", "mock"}:
-        source_mode = "mock" if snapshot.synthetic else (connection.connector_mode or "http")
+        if snapshot.synthetic:
+            source_mode = "mock"
+        else:
+            source_mode = connection.connector_mode or "http"
+        if source_mode == "mock" and not snapshot.synthetic:
+            source_mode = "http"
     connection.status = "connected"
     connection.external_store_id = snapshot.external_store_id
     connection.connector_mode = source_mode
@@ -146,7 +158,7 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
         }
     )
     if raw_meta:
-        meta["snapshot"] = raw_meta
+        meta["snapshot_keys"] = sorted(str(key) for key in raw_meta.keys())[:24]
     connection.meta_json = json.dumps(meta, ensure_ascii=False)
     db.add(connection)
     db.flush()
@@ -168,34 +180,40 @@ def sync_store_platform(
     store: Store,
     platform: str,
     *,
-    mode: str = "mock",
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    snapshot = fetch_platform_snapshot(
-        platform,
-        store_id=store.id,
-        mode=mode,
-        store_name=store.name,
-        external_store_id=store.platform_store_key,
-    )
+    from app.services.connector_mode import resolve_fetch_mode
+
     connection = db.execute(
         select(PlatformConnection).where(
             PlatformConnection.store_id == store.id,
             PlatformConnection.platform == platform,
         )
     ).scalar_one_or_none()
+    use_mode = resolve_fetch_mode(
+        requested=mode,
+        connection_mode=connection.connector_mode if connection else None,
+    )
+    snapshot = fetch_platform_snapshot(
+        platform,
+        store_id=store.id,
+        mode=use_mode,
+        store_name=store.name,
+        external_store_id=store.platform_store_key,
+    )
     if connection is None:
         connection = PlatformConnection(
             store_id=store.id,
             platform=platform,
             status="pending",
-            connector_mode=mode,
+            connector_mode=use_mode,
         )
         db.add(connection)
         db.flush()
-    connection.connector_mode = mode
+    connection.connector_mode = use_mode
     try:
         result = apply_platform_snapshot(db, store, snapshot)
-        result["mode"] = mode
+        result["mode"] = use_mode
         return result
     except Exception as exc:  # noqa: BLE001 - surface to API
         connection.status = "error"
@@ -321,9 +339,20 @@ def sync_all_platforms(
     errors: list[dict[str, str]] = []
     for platform in platforms:
         conn = next((row for row in connections if row.platform == platform), None)
-        use_mode = (mode or (conn.connector_mode if conn else None) or "mock").strip().lower()
-        if use_mode not in {"mock", "http", "mobile", "oauth"}:
-            use_mode = "mock"
+        try:
+            from app.services.connector_mode import resolve_fetch_mode
+
+            use_mode = resolve_fetch_mode(
+                requested=mode,
+                connection_mode=conn.connector_mode if conn else None,
+            )
+        except Exception as exc:  # ConnectorModeError
+            errors.append({"platform": platform, "error": str(exc)})
+            if conn is not None:
+                conn.status = "error"
+                conn.last_error = str(exc)
+                db.add(conn)
+            continue
         try:
             snapshots.append(
                 fetch_platform_snapshot(

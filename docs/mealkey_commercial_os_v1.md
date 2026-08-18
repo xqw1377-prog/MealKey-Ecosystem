@@ -48,6 +48,17 @@ P1/P2：Embedded/API（跑出真实店以后）。
 P2：Result/利润分成。
 P3：Strategy/Data 产品。
 
-数据通道：Official API → Service Provider API → CSV/Excel → 报表/截图 → 商家确认。全部进入同一个 StoreState。
+数据通道（2026-08-17 冻结，优先级不可自动上调）：
+
+```text
+OFFICIAL_API
+→ SERVICE_PROVIDER_API
+→ AUTHORIZED_SESSION          ← 商家授权数据连接器；官方/服务商 API 之后的受控 fallback
+→ FILE_IMPORT
+→ SCREENSHOT
+→ MERCHANT_CONFIRMATION
+```
+
+原则：Connector 只获得 Evidence，不决定 Truth；`AUTHORIZED_SESSION` 永不升为第一优先级；缺字段保持 UNKNOWN，禁止模型补全。全部经 Reconciliation 后进入同一个 StoreState。细则见 `docs/data_acquisition_strategy_v1.md`。工程冲突时：**Business Truth Connectivity > Agent Runtime Optimization**。
 
 政策数字以 `app/services/commercial/policy.py` 为唯一真相源。冻结页：`/commercial-os`。竞争战略冻结页：`/competitive-strategy`。

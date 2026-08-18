@@ -5,14 +5,15 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.routes_dev import seed_demo
 from app.core.config import settings
+from app.core.security import enforce_store_access
 from app.db.session import get_db
-from app.models.entities import ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, Merchant, ShopFunnelDaily, Store
+from app.models.entities import Brand, ItemFunnelDaily, Menu, MenuItem, MenuItemVersion, Merchant, ShopFunnelDaily, Store
 from app.models.intake import IntakeRawAsset, IntakeSubmission
 from app.models.notification import Notification
 from app.models.ohre import Experiment, Hypothesis, Observation, Recommendation
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 def _store_query():
     return select(Store).options(
         selectinload(Store.merchant),
+        selectinload(Store.brand),
         selectinload(Store.items).selectinload(MenuItem.current_version),
     )
 
@@ -938,19 +940,48 @@ def _answer_store_manager(question: str, dashboard: dict[str, Any]) -> dict[str,
 
 
 def _create_store_from_intake(db: Session, payload: IntakeSubmitRequest, readiness: dict[str, Any]) -> Store:
-    merchant = Merchant(
-        name=payload.merchant_name or payload.store_name,
-        brand_name=payload.merchant_name,
-        category=payload.category,
-        cuisine_type=payload.cuisine_type,
-        location=payload.address,
-        business_hours=payload.business_hours,
-    )
-    db.add(merchant)
-    db.flush()
+    from app.services.org_tree import bind_store_to_merchant_tenants
+
+    merchant = None
+    brand = None
+    if payload.brand_id:
+        brand = db.execute(select(Brand).where(Brand.id == payload.brand_id)).scalar_one_or_none()
+        if brand is None:
+            raise HTTPException(status_code=404, detail="brand not found")
+        merchant = db.execute(select(Merchant).where(Merchant.id == brand.merchant_id)).scalar_one_or_none()
+    elif payload.merchant_id:
+        merchant = db.execute(select(Merchant).where(Merchant.id == payload.merchant_id)).scalar_one_or_none()
+        if merchant is None:
+            raise HTTPException(status_code=404, detail="enterprise not found")
+
+    created_merchant = merchant is None
+    if merchant is None:
+        merchant = Merchant(
+            name=payload.merchant_name or payload.store_name,
+            brand_name=payload.merchant_name,
+            category=payload.category,
+            cuisine_type=payload.cuisine_type,
+            location=payload.address,
+            business_hours=payload.business_hours,
+        )
+        db.add(merchant)
+        db.flush()
+
+    if brand is None:
+        brand = Brand(
+            merchant_id=merchant.id,
+            name=payload.merchant_name or payload.category or payload.store_name,
+            category=payload.category or merchant.category,
+            cuisine_type=payload.cuisine_type or merchant.cuisine_type,
+            business_hours=payload.business_hours or merchant.business_hours,
+            status="active",
+        )
+        db.add(brand)
+        db.flush()
 
     store = Store(
         merchant_id=merchant.id,
+        brand_id=brand.id,
         name=payload.store_name,
         address=payload.address,
         area=payload.area,
@@ -963,6 +994,8 @@ def _create_store_from_intake(db: Session, payload: IntakeSubmitRequest, readine
     )
     db.add(store)
     db.flush()
+    if not created_merchant:
+        bind_store_to_merchant_tenants(db, store)
 
     menu = Menu(store_id=store.id, name="默认菜单", type="delivery", version=1, status="active")
     db.add(menu)
@@ -1367,9 +1400,13 @@ def list_stores(db: Session = Depends(get_db)):
                 "name": store.name,
                 "city": store.city,
                 "area": store.area,
-                "category": getattr(store.merchant, "category", None),
+                "category": getattr(store.brand, "category", None) or getattr(store.merchant, "category", None),
                 "audience": store.primary_audience,
                 "pain": store.primary_pain,
+                "merchant_id": store.merchant_id,
+                "merchant_name": getattr(store.merchant, "name", None),
+                "brand_id": store.brand_id,
+                "brand_name": getattr(store.brand, "name", None) or getattr(store.merchant, "brand_name", None),
             }
             for store in stores
         ]
@@ -1423,10 +1460,11 @@ def read_store_notification(notification_id: str, db: Session = Depends(get_db))
 
 
 @router.post("/platforms/oauth/{platform}/start")
-def start_platform_oauth(platform: str, store_id: str = Query(default="")):
+def start_platform_oauth(request: Request, platform: str, store_id: str = Query(default="")):
     """平台 OAuth 入口。"""
     from app.services.platform_oauth import build_oauth_state, get_oauth_url, is_oauth_configured
 
+    enforce_store_access(getattr(request.state, "principal", None), store_id or None)
     key = (platform or "").strip().lower()
     if key not in {"meituan", "eleme"}:
         raise HTTPException(status_code=400, detail="unsupported platform")
@@ -1808,8 +1846,8 @@ def ignore_recommendation(recommendation_id: str, db: Session = Depends(get_db))
 
 @router.post("/recommendations/{recommendation_id}/execute")
 def execute_recommendation(recommendation_id: str, db: Session = Depends(get_db)):
-    """执行建议：能系统内落库的动作直接改 MenuItem；其余进入观察窗并标明需平台操作。"""
-    from app.services.recommendation_executor import execute_recommendation_domain
+    """Action Pipeline 薄入口。不能直接把 recommendation 标成 executed。"""
+    from app.services.action_pipeline import ActionPipelineError, run_recommendation_pipeline
 
     rec = db.get(Recommendation, recommendation_id)
     if rec is None:
@@ -1819,22 +1857,24 @@ def execute_recommendation(recommendation_id: str, db: Session = Depends(get_db)
         rec.status = "adopted"
         rec.adopted_at = now
 
-    domain = execute_recommendation_domain(db, rec)
+    try:
+        pipeline = run_recommendation_pipeline(db, rec, actor="owner", approved=True)
+    except ActionPipelineError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "stage": exc.stage, "message": str(exc), **exc.payload},
+        ) from exc
 
-    rec.status = "executed"
-    rec.executed_at = now
-    message = "商家已执行建议"
-    if domain.get("applied"):
-        message = domain.get("detail") or "已在系统内执行"
-    elif domain.get("mode") == "awaiting_platform":
-        message = domain.get("detail") or "已记录执行，等待平台侧确认"
+    domain = pipeline.get("domain_execution") or {}
     _append_recommendation_feedback(
         rec,
         {
             "status": "executed",
             "at": now.isoformat(),
-            "message": message,
+            "message": domain.get("detail") or "已在系统内执行",
             "domain_execution": domain,
+            "pipeline": {"code": pipeline.get("code"), "stages": pipeline.get("stages")},
         },
     )
     experiment = _ensure_experiment(db, rec)
@@ -1847,6 +1887,7 @@ def execute_recommendation(recommendation_id: str, db: Session = Depends(get_db)
         "executed_at": rec.executed_at,
         "experiment_id": experiment.id,
         "domain_execution": domain,
+        "pipeline": pipeline,
     }
 
 
@@ -1856,8 +1897,10 @@ def mark_recommendation_no_effect(recommendation_id: str, db: Session = Depends(
     if rec is None:
         raise HTTPException(status_code=404, detail="recommendation not found")
     if rec.status != "executed":
-        rec.status = "executed"
-        rec.executed_at = rec.executed_at or datetime.now(timezone.utc)
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "MUST_EXECUTE_FIRST", "message": "只能对已通过 Action Pipeline 提交的动作反馈无效果。"},
+        )
     experiment = _ensure_experiment(db, rec)
     experiment.result = "neutral"
     experiment.attribution_quality = "low"

@@ -163,7 +163,7 @@
         <tr><td>Result / 利润增量分成</td><td>P2</td><td>Attribution 成熟以后</td></tr>
         <tr><td>Strategy / Data 产品</td><td>P3</td><td>足够门店和 Outcome Data 以后</td></tr>
       </table>
-      <div class="callout info"><b>数据通道不是爬虫赌命</b>Official API → Service Provider API → CSV/Excel → 报表/截图 → 商家确认。无论哪条，最终进入同一个 StoreState。这叫 Platform Independence。</div>
+      <div class="callout info"><b>数据通道不是爬虫赌命</b>Official API → Service Provider API → 商家授权数据连接器 → 文件导入 → 报表/截图 → 商家确认。授权会话永不升为第一优先级。无论哪条，只先得到 Evidence，对账后才进入同一个 StoreState。这叫 Platform Independence。</div>
     </section>
     <section class="panel" id="customer">
       <div class="callout info"><b>客户只回答两个问题</b>接多少家店？买多久？没有 Token 套餐、Agent 套餐、功能等级、会员等级，也不发券。</div>

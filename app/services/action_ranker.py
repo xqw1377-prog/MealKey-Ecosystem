@@ -10,6 +10,31 @@ from typing import Any, Iterable, Optional
 
 from app.schemas.strategy_memory import StrategyMemoryItem, StrategyMemorySnapshot
 
+# Evidence storage weight ≠ production ranking permission.
+# Observed can explain; it must not boost Growth production ranking.
+GROWTH_RANK_ACTIONS = {
+    "adjust_price_value",
+    "store_discount",
+    "launch_value_bundle_promo",
+    "join_lunch_campaign",
+    "match_competitor_promo",
+    "boost_hero_item_ads",
+    "shift_ads_to_high_cvr_item",
+    "pause_broad_ads",
+    "issue_repurchase_coupon",
+    "reactivate_dormant_customer",
+    "referral_share",
+}
+GROWTH_RANK_FAMILIES = {"price", "ads"}
+EXPLAIN_ONLY = "explain_only"
+MAY_RANK = "may_rank"
+STRONG_RANK = "strong_rank"
+RANK_PERMISSION = {
+    "observed": EXPLAIN_ONLY,
+    "attributed": MAY_RANK,
+    "incremental": STRONG_RANK,
+}
+
 FAMILIES: dict[str, set[str]] = {
     "creative": {
         "change_main_image",
@@ -46,16 +71,44 @@ def family_of(action_type: str) -> str:
     return "other"
 
 
+def is_growth_rank_action(action_type: str) -> bool:
+    return action_type in GROWTH_RANK_ACTIONS or family_of(action_type) in GROWTH_RANK_FAMILIES
+
+
+def evidence_kind_of(item: StrategyMemoryItem) -> str:
+    tags = {str(tag).strip().lower() for tag in (item.context_tags or [])}
+    if "incremental" in tags:
+        return "incremental"
+    if "attributed" in tags:
+        return "attributed"
+    kind = str(getattr(item, "evidence_kind", "") or "").strip().lower()
+    if kind in RANK_PERMISSION:
+        return kind
+    return "observed"
+
+
+def ranking_permission(item: StrategyMemoryItem) -> str:
+    return RANK_PERMISSION[evidence_kind_of(item)]
+
+
 def memory_delta_for_action(
     action_type: str,
     memory: StrategyMemorySnapshot | None,
     *,
     metric: str | None = None,
+    ranking_mode: str = "full",
 ) -> float:
-    """返回加在 0–1 优先级上的增量。"""
+    """返回加在 0–1 优先级上的增量。
+
+    ranking_mode=growth：Observed 对发券/唤醒/Referral/价格/补贴只有 explain_only，
+    正增益不进入生产排序；负向否决仍生效。
+    """
     if memory is None or not memory.items:
         return 0.0
+    if ranking_mode not in {"full", "growth"}:
+        ranking_mode = "full"
     delta = 0.0
+    growth_target = is_growth_rank_action(action_type)
     for index, item in enumerate(memory.items[:8]):
         recency = 1.0 if index == 0 else max(0.35, 0.85**index)
         weight = recency * max(0.4, min(1.0, item.confidence or 0.7))
@@ -68,15 +121,18 @@ def memory_delta_for_action(
             metric_match = metric in item.context_tags or any(
                 tag in {metric, "ctr", "cvr", "orders", "rating"} for tag in item.context_tags
             )
+        allow_positive = True
+        if growth_target and ranking_permission(item) == EXPLAIN_ONLY:
+            allow_positive = False
         if same:
-            if item.result == "positive":
+            if item.result == "positive" and allow_positive:
                 delta += min(0.28, 0.12 + 0.007 * min(lift, 20.0)) * (weight / 0.72)
             elif item.result == "negative":
                 delta -= min(0.30, 0.14 + 0.006 * min(lift, 20.0)) * (weight / 0.64)
             elif item.result == "neutral":
                 delta -= 0.05 * recency
         elif learned_family == action_family and action_family != "other":
-            if item.result == "positive":
+            if item.result == "positive" and allow_positive:
                 delta += 0.07 * recency
             elif item.result == "negative":
                 delta -= 0.05 * recency
@@ -114,7 +170,7 @@ def apply_memory_to_growth_pool(pool: list[Any], memory: StrategyMemorySnapshot 
     adjusted = []
     for row in pool:
         base = max(0.0, min(1.0, float(getattr(row, "score", 0.0) or 0.0) / 100.0))
-        delta = memory_delta_for_action(getattr(row, "action_type", ""), memory)
+        delta = memory_delta_for_action(getattr(row, "action_type", ""), memory, ranking_mode="growth")
         final = max(0.0, min(1.0, base + delta))
         update = {"score": round(final * 100.0, 1)}
         if hasattr(row, "model_copy"):

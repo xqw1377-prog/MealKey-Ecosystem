@@ -5,7 +5,13 @@ function bindEvents() {
     await loadDashboard(event.target.value);
   });
 
-  qs("#bootstrapBtn").addEventListener("click", bootstrapWorkspace);
+  qs("#bootstrapBtn").addEventListener("click", () => {
+    if (state.stores.length) {
+      openOwnerProfileModal({ focus: "org" });
+      return;
+    }
+    bootstrapWorkspace();
+  });
   qs("#refreshBtn").addEventListener("click", refreshDashboard);
   qs("#mkIntakeBtn")?.addEventListener("click", openIntakeModal);
   qs("#intakePreviewBtn")?.addEventListener("click", previewIntakeForm);
@@ -58,6 +64,27 @@ function bindEvents() {
     topupOwnerWallet(btn.dataset.walletTopup).catch((error) => notifyError(error.message));
   });
   qs("#ownerProfileForm")?.addEventListener("submit", saveOwnerProfile);
+  qs("#enterpriseSettingsForm")?.addEventListener("submit", saveEnterpriseSettings);
+  qs("#orgNewBrandForm")?.addEventListener("submit", createOrgBrand);
+  qs("#orgBrandList")?.addEventListener("submit", (event) => {
+    const brandForm = event.target.closest("[data-brand-form]");
+    if (brandForm) {
+      event.preventDefault();
+      event.currentTarget = brandForm;
+      saveOrgBrand({ preventDefault() {}, currentTarget: brandForm });
+      return;
+    }
+    const storeForm = event.target.closest("[data-add-store]");
+    if (storeForm) {
+      event.preventDefault();
+      createOrgStore({ preventDefault() {}, currentTarget: storeForm });
+    }
+  });
+  qs("#orgBrandList")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-switch-store]");
+    if (!btn) return;
+    switchOrgStore(btn.dataset.switchStore).catch((error) => notifyError(error.message));
+  });
   qs("#ownerAvatarPickBtn")?.addEventListener("click", () => qs("#ownerAvatarFileInput")?.click());
   qs("#ownerAvatarPreview")?.addEventListener("click", () => qs("#ownerAvatarFileInput")?.click());
   qs("#ownerAvatarClearBtn")?.addEventListener("click", () => {

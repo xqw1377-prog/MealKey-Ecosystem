@@ -26,6 +26,25 @@ def test_decode_access_token_roundtrip():
     assert not principal.can_access_store("s9")
 
 
+def test_operator_with_empty_store_ids_is_denied_everywhere():
+    """P0-3: operator 空授权门店必须 fail closed，不得 fail open 成全店权限。"""
+    token = create_access_token(
+        subject="op_empty",
+        tenant_id="t1",
+        store_ids=[],
+        role="operator",
+        expires_minutes=30,
+    )
+    principal = decode_access_token(token)
+    assert principal.store_ids == ()
+    assert principal.role == "operator"
+    assert not principal.is_admin
+    # 空 store_ids 的 operator 不得访问任意门店
+    assert not principal.can_access_store("s1")
+    assert not principal.can_access_store("s9")
+    assert not principal.can_access_store("anything")
+
+
 def test_issue_admin_jwt_with_api_token(monkeypatch):
     monkeypatch.setattr(settings, "api_token", "master-secret")
     monkeypatch.setattr(settings, "jwt_secret", "jwt-test-secret-32bytes-minimum!!")

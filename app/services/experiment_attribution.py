@@ -11,24 +11,61 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import ItemFunnelDaily, ReviewFact
 from app.models.ohre import Experiment, Recommendation
 from app.services.store_state import build_store_state
 from app.services.strategy_memory import upsert_strategy_memory_from_experiment
+from app.services.truth_resolution import production_funnel_clause
 
 logger = logging.getLogger(__name__)
 
 # 归因阈值（与 routes_workspace._evaluate_experiment_record 保持一致）
 LIFT_POSITIVE_THRESHOLD = 2.0
 LIFT_NEGATIVE_THRESHOLD = -2.0
+FAILED_VERIFICATION = "FAILED_VERIFICATION"
+
+
+def _loads_dict(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _emit_verification_failure(db: Session, experiment: Experiment, exc: BaseException) -> None:
+    logger.error("FAILED_VERIFICATION experiment=%s: %s", experiment.id, exc)
+    try:
+        from app.services.agent_event_log import AgentEventLog
+
+        AgentEventLog(db, store_id=experiment.store_id, session_id=f"verify:{experiment.id}").error(
+            message=FAILED_VERIFICATION,
+            context={"experiment_id": experiment.id, "error": str(exc), "type": type(exc).__name__},
+        )
+    except Exception:  # noqa: BLE001 — 事件日志失败不能再次吞掉归因失败本身
+        logger.exception("failed to emit FAILED_VERIFICATION event for %s", experiment.id)
+
+
+def _mark_failed_verification(db: Session, experiment: Experiment, exc: BaseException) -> None:
+    experiment.result = "unknown"
+    note = (experiment.notes or "").strip()
+    marker = FAILED_VERIFICATION
+    experiment.notes = f"{note} {marker}".strip() if note else marker
+    db.add(experiment)
+    _emit_verification_failure(db, experiment, exc)
 
 
 @dataclass
@@ -96,7 +133,7 @@ def _item_funnel_observed(db: Session, item_id: str, from_day, to_day) -> bool:
             ItemFunnelDaily.item_id == item_id,
             ItemFunnelDaily.day >= from_day,
             ItemFunnelDaily.day <= to_day,
-            or_(ItemFunnelDaily.data_source.is_(None), ItemFunnelDaily.data_source != "synthetic"),
+            production_funnel_clause(ItemFunnelDaily.data_source),
         )
     ).scalar() or 0
     return count > 0
@@ -243,8 +280,11 @@ def evaluate_experiment(
                 )
                 if result == "positive":
                     note += "(但到手率偏低,注意利润)"
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 — P0-8: 护栏自身故障不能静默
+        # 不能让本该降级 neutral 的 positive 在护栏自身故障时漏网保留 positive。
+        # 记 warning + 追加告警，交由下面的统一降级逻辑处理。
+        logger.warning("profit guardrail check failed for experiment=%s: %s", experiment.id, exc)
+        guardrail_warnings.append("利润护栏检查失败，无法确认到手率安全")
 
     # 检查投流护栏:CPC 是否在实验期间上涨
     try:
@@ -270,8 +310,9 @@ def evaluate_experiment(
                     guardrail_warnings.append(
                         f"实验期间 CPC 上涨 {cpc_change:.0f}%,投流成本在恶化"
                     )
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 — P0-8: 护栏自身故障不能静默
+        logger.warning("cpc guardrail check failed for experiment=%s: %s", experiment.id, exc)
+        guardrail_warnings.append("投流护栏检查失败，无法确认 CPC 安全")
 
     # 如果护栏告警,降级 positive → neutral
     if guardrail_warnings and result == "positive":
@@ -288,11 +329,10 @@ def evaluate_experiment(
     experiment.notes = f"{metric_name}（{scope_label}）{note}"
     db.add(experiment)
 
-    # P1-A: 回写预估-实际对账数据到 recommendation
+    # P1-A: 回写预估-实际对账数据到 recommendation。失败必须显式 FAILED_VERIFICATION。
     try:
         rec = db.get(Recommendation, experiment.recommendation_id)
         if rec:
-            import json as _json
             content = _loads_dict(rec.content_json)
             expected_high = float(rec.expected_lift_pct_high or 0)
             actual_lift = float(lift_pct) if lift_pct is not None else 0.0
@@ -309,16 +349,31 @@ def evaluate_experiment(
                 "attribution_quality": attribution_quality,
                 "metric": metric_name,
             }
-            rec.content_json = _json.dumps(content, ensure_ascii=False)
+            rec.content_json = json.dumps(content, ensure_ascii=False)
             db.add(rec)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        _mark_failed_verification(db, experiment, exc)
+        return AttributionOutcome(
+            experiment_id=experiment.id,
+            store_id=experiment.store_id,
+            result="unknown",
+            lift_pct=lift_pct,
+            reason=FAILED_VERIFICATION,
+        )
 
     # 同步沉淀策略记忆（upsert 内部会 commit，这里保持原行为）
     try:
         upsert_strategy_memory_from_experiment(db, experiment)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("strategy_memory upsert failed for %s: %s", experiment.id, exc)
+        logger.error("strategy_memory upsert failed for %s: %s", experiment.id, exc)
+        _mark_failed_verification(db, experiment, exc)
+        return AttributionOutcome(
+            experiment_id=experiment.id,
+            store_id=experiment.store_id,
+            result="unknown",
+            lift_pct=lift_pct,
+            reason=FAILED_VERIFICATION,
+        )
 
     return AttributionOutcome(
         experiment_id=experiment.id,
@@ -370,15 +425,15 @@ def attribute_store_experiments(
             outcome = evaluate_experiment(db, experiment, days=days)
             outcomes.append(outcome)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("evaluate_experiment failed for %s: %s", experiment.id, exc)
+            _mark_failed_verification(db, experiment, exc)
             outcomes.append(
                 AttributionOutcome(
                     experiment_id=experiment.id,
                     store_id=store_id,
-                    result=experiment.result,
+                    result="unknown",
                     lift_pct=experiment.lift_pct,
                     skipped=True,
-                    reason=f"error:{type(exc).__name__}",
+                    reason=f"{FAILED_VERIFICATION}:{type(exc).__name__}",
                 )
             )
     db.commit()

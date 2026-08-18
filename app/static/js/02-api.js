@@ -286,6 +286,7 @@ async function loadHomeWorkspace(storeId) {
   state.runtimeWorkspace = runtimeWorkspace;
   state.settingsOverview = settingsOverview;
   state.ownerProfile = settingsOverview?.owner || state.ownerProfile;
+  state.enterpriseSettings = settingsOverview?.enterprise || state.enterpriseSettings;
   state.understanding = understanding;
   state.platformLinks = platformLinks?.links || [];
   if (commercialBoard) state.commercialBoard = commercialBoard;
@@ -302,6 +303,7 @@ async function loadHomeWorkspace(storeId) {
   renderHomeShell();
   applyOwnerProfileUI(state.ownerProfile || settingsOverview?.owner);
   loadOwnerProfile(storeId).catch(() => null);
+  loadEnterpriseSettings(storeId).catch(() => null);
   if (typeof renderDataCoveragePanel === "function") renderDataCoveragePanel();
 }
 
@@ -539,6 +541,7 @@ async function loadDashboard(storeId, { forceFull = false } = {}) {
   state.platformLinks = platformLinks.links || [];
   state.settingsOverview = settingsOverview;
   state.ownerProfile = settingsOverview?.owner || state.ownerProfile;
+  state.enterpriseSettings = settingsOverview?.enterprise || state.enterpriseSettings;
   await fetchSensingBundle(storeId);
   state._fullDashboardLoaded = true;
   renderDashboard();
@@ -587,6 +590,7 @@ async function refreshDashboard() {
     state.platformLinks = platformLinks.links || [];
     state.settingsOverview = settingsOverview;
     state.ownerProfile = settingsOverview?.owner || state.ownerProfile;
+  state.enterpriseSettings = settingsOverview?.enterprise || state.enterpriseSettings;
     await fetchSensingBundle(state.currentStoreId);
     state._fullDashboardLoaded = true;
     renderDashboard();
@@ -607,6 +611,21 @@ async function loadOwnerProfile(storeId = state.currentStoreId) {
     state.ownerProfile = profile;
     applyOwnerProfileUI(profile);
     return profile;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function loadEnterpriseSettings(storeId = state.currentStoreId) {
+  if (!storeId) return null;
+  try {
+    const enterprise = await fetchJson(`/settings/stores/${storeId}/enterprise`);
+    state.enterpriseSettings = enterprise;
+    if (state.settingsOverview) state.settingsOverview.enterprise = enterprise;
+    if (qs("#ownerProfileModal")?.classList.contains("open")) {
+      fillEnterpriseSettingsForm(enterprise);
+    }
+    return enterprise;
   } catch (_) {
     return null;
   }

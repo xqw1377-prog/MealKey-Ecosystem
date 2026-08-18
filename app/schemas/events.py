@@ -12,6 +12,7 @@ EventType = Literal[
     "RATING_DROP",
     "IM_REPLY_DROP",
     "CTR_DROP",
+    "ORDER_DROP",
     "CVR_DROP",
     "TAKE_RATE_DROP",
     "ADS_ROI_DROP",

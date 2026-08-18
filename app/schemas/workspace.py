@@ -52,6 +52,8 @@ class IntakePreviewRequest(BaseModel):
 class IntakeSubmitRequest(IntakePreviewRequest):
     business_hours: Optional[str] = None
     referral_artifact_id: Optional[str] = Field(default=None, max_length=36)
+    merchant_id: Optional[str] = Field(default=None, max_length=36)
+    brand_id: Optional[str] = Field(default=None, max_length=36)
 
 
 class DocumentSyncRequest(BaseModel):

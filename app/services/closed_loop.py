@@ -200,7 +200,7 @@ def _related_event(now: dict[str, Any], events) -> Any:
         title = str(getattr(event, "title", "") or "")
         if action == "change_main_image" and et in {"CTR_DROP"}:
             return event
-        if action == "change_title" and et in {"CTR_DROP", "CVR_DROP"}:
+        if action == "change_title" and et in {"CTR_DROP", "CVR_DROP", "ORDER_DROP"}:
             return event
         if action == "batch_reply_negative_reviews" and et in {"RATING_DROP"}:
             return event
@@ -366,7 +366,13 @@ def mark_loop_executed(
     item = get_loop(db, store_id, loop_id)
     if item is None:
         raise ValueError("loop not found")
+    from app.services.action_capability import ActionCapabilityError, assert_action_executable
     from app.services.store_ops import is_human_task, require_evidence
+
+    try:
+        assert_action_executable(item.action_type or "ops_hint")
+    except ActionCapabilityError as exc:
+        raise ValueError(exc.code) from exc
 
     if is_human_task(item):
         require_evidence(item)
@@ -391,8 +397,9 @@ def mark_loop_executed(
     item.recommendation_id = rec.id
     if rec.adopted_at is None:
         rec.adopted_at = now
-    rec.status = "executed"
-    rec.executed_at = now
+    from app.services.action_pipeline import commit_recommendation_executed
+
+    commit_recommendation_executed(rec, now=now, actor="closed_loop", domain={"loop_id": item.id})
     experiment = _ensure_experiment(db, rec, item, executor=item.executor)
     item.experiment_id = experiment.id
     _sync_work_thread(db, item, pack)
@@ -540,9 +547,12 @@ def _close_observation(db: Session, item: ClosedLoopItem) -> None:
         experiment = db.get(Experiment, item.experiment_id) if item.experiment_id else None
         if experiment is not None:
             if experiment.result in {None, "pending"}:
-                try:
-                    from app.services.experiment_attribution import evaluate_experiment
+                from app.services.experiment_attribution import (
+                    _mark_failed_verification,
+                    evaluate_experiment,
+                )
 
+                try:
                     outcome = evaluate_experiment(db, experiment, days=7)
                     result = str(outcome.result or experiment.result or "unknown")
                     if outcome.lift_pct is not None:
@@ -553,9 +563,16 @@ def _close_observation(db: Session, item: ClosedLoopItem) -> None:
                         )
                     elif outcome.skipped:
                         summary = f"观察窗已到。还没有足够读数自动判定，先记为待确认。{outcome.reason or ''}"
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — P0-8: verification failure 不能静默
+                    # 未预期异常不得伪装成正常「待确认」。必须显式 FAILED_VERIFICATION：
+                    # experiment.result=unknown + marker + AgentEventLog error。
                     logger.warning("loop experiment evaluate failed for %s: %s", item.id, exc)
-                    result = experiment.result or "unknown"
+                    _mark_failed_verification(db, experiment, exc)
+                    result = "unknown"
+                    summary = (
+                        "观察窗已到，但自动归因失败（"
+                        f"{type(exc).__name__}）。已标记 FAILED_VERIFICATION，请人工核对平台数据。"
+                    )
             else:
                 result = experiment.result
                 if experiment.lift_pct is not None:

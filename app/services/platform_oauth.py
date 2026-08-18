@@ -5,6 +5,7 @@ V1 目标：
 2. 返回正式授权 URL
 3. callback/code -> access_token/refresh_token
 4. 持久化到 PlatformConnection，后续可用于真实平台拉数
+5. SEC-PLATFORM-01：token 进 secret setting，meta/API 只留 credential_status
 
 说明：
 - 平台字段仍需使用商家自己的开放平台配置
@@ -28,6 +29,12 @@ from sqlalchemy.orm import Session
 
 from app.models.settings import PlatformConnection
 from app.services.copy_humanize import humanize_operator_text
+from app.services.credential_store import (
+    has_oauth_secret,
+    migrate_legacy_oauth_tokens,
+    public_oauth_fields,
+    put_oauth_secret,
+)
 from app.services.settings_store import get_setting, set_setting
 
 
@@ -219,18 +226,23 @@ def persist_oauth_connection(
         db.add(row)
         db.flush()
     meta = _load_meta(row.meta_json)
-    oauth = meta.get("oauth") if isinstance(meta.get("oauth"), dict) else {}
-    oauth.update(
-        {
-            "access_token": str(token_payload.get("access_token") or ""),
-            "refresh_token": str(token_payload.get("refresh_token") or oauth.get("refresh_token") or ""),
-            "token_type": str(token_payload.get("token_type") or oauth.get("token_type") or "bearer"),
-            "scope": str(token_payload.get("scope") or oauth.get("scope") or ""),
-            "raw": token_payload,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    meta["oauth"] = oauth
+    existing = meta.get("oauth") if isinstance(meta.get("oauth"), dict) else {}
+    had_plaintext = bool(existing.get("access_token") or existing.get("refresh_token") or existing.get("raw"))
+    merged = {
+        "access_token": str(token_payload.get("access_token") or existing.get("access_token") or ""),
+        "refresh_token": str(token_payload.get("refresh_token") or existing.get("refresh_token") or ""),
+        "token_type": str(token_payload.get("token_type") or existing.get("token_type") or "bearer"),
+        "scope": str(token_payload.get("scope") or existing.get("scope") or ""),
+    }
+    ref = put_oauth_secret(db, store_id, platform, merged)
+    meta["oauth"] = {
+        "credential_ref": ref,
+        "credential_status": "ACTIVE",
+        "token_type": merged["token_type"],
+        "scope": merged["scope"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "rotate_recommended": had_plaintext,
+    }
     row.meta_json = json.dumps(meta, ensure_ascii=False)
     row.status = "connected"
     row.connector_mode = "oauth"
@@ -243,19 +255,31 @@ def persist_oauth_connection(
     return row
 
 
-def oauth_status(row: PlatformConnection | None) -> dict[str, object]:
+def oauth_status(row: PlatformConnection | None, db: Session | None = None) -> dict[str, object]:
     if row is None:
         return {"connected": False}
+    if db is not None:
+        migrate_legacy_oauth_tokens(db, row)
     meta = _load_meta(row.meta_json)
     oauth = meta.get("oauth") if isinstance(meta.get("oauth"), dict) else {}
+    expires = row.auth_expires_at.isoformat() if row.auth_expires_at else None
+    public = public_oauth_fields(oauth, expires_at=expires)
+    connected = bool(
+        oauth.get("credential_status") == "ACTIVE"
+        or (db is not None and has_oauth_secret(db, row.store_id, row.platform))
+    )
     return {
-        "connected": bool(oauth.get("access_token")),
+        "connected": connected,
         "connector_mode": row.connector_mode,
         "status": row.status,
         "external_store_id": row.external_store_id,
         "token_type": oauth.get("token_type") or "bearer",
         "scope": oauth.get("scope") or "",
-        "auth_expires_at": row.auth_expires_at.isoformat() if row.auth_expires_at else None,
+        "scopes": public["scopes"],
+        "expires_at": expires,
+        "auth_expires_at": expires,
+        "credential_status": public["credential_status"],
+        "rotate_recommended": public["rotate_recommended"],
     }
 
 

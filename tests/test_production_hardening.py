@@ -26,6 +26,7 @@ def test_cors_origins_parse_comma_and_json() -> None:
 def test_production_rejects_wildcard_cors(monkeypatch) -> None:
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "api_token", "prod-secret-token")
+    monkeypatch.setattr(settings, "jwt_secret", "prod-jwt-secret-independent-32b!!")
     monkeypatch.setattr(settings, "cors_origins", "*")
     with pytest.raises(SystemExit):
         create_app()
@@ -34,6 +35,7 @@ def test_production_rejects_wildcard_cors(monkeypatch) -> None:
 def test_production_hides_openapi_and_keeps_health(monkeypatch) -> None:
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "api_token", "prod-secret-token")
+    monkeypatch.setattr(settings, "jwt_secret", "prod-jwt-secret-independent-32b!!")
     monkeypatch.setattr(settings, "cors_origins", "https://app.example.com")
     client = TestClient(create_app())
     assert client.get("/docs").status_code == 404

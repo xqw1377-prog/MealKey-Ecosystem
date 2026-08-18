@@ -344,6 +344,11 @@ def production_readiness() -> dict[str, Any]:
             "detail": "没有 PLATFORM_CONNECTOR_URL 时走复制到美团，不宣称写回成功",
         },
         {
+            "id": "prod_never_mock",
+            "ok": settings.is_dev or writeback["mode"] != "mock",
+            "detail": "生产禁止 Mock，且绝不能 fallback 到 Mock",
+        },
+        {
             "id": "secrets_not_in_repo",
             "ok": secrets_ok,
             "detail": "密钥只放 .env，不入库、不进 git",

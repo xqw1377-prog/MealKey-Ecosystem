@@ -56,7 +56,16 @@ def test_oauth_state_roundtrip_and_persist_connection() -> None:
     assert row.status == "connected"
     assert row.external_store_id == "mt-shop-1"
     meta = json.loads(row.meta_json or "{}")
-    assert meta["oauth"]["access_token"] == "at-demo"
+    assert "access_token" not in meta.get("oauth", {})
+    assert "refresh_token" not in meta.get("oauth", {})
+    assert meta["oauth"]["credential_status"] == "ACTIVE"
+    from app.services.credential_store import get_oauth_secret, public_platform_link
+
+    secret = get_oauth_secret(db, store.id, "meituan")
+    assert secret["access_token"] == "at-demo"
+    public = public_platform_link(row, db=db)
+    assert "access_token" not in json.dumps(public)
+    assert public["connected"] is True
 
 
 def test_notifications_queue_in_quiet_hours_and_merge_digest(monkeypatch) -> None:

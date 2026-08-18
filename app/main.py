@@ -47,6 +47,12 @@ async def lifespan(_app: FastAPI):
     try:
         with SessionLocal() as db:
             backfill_legacy_competitor_watches(db)
+            if not settings.is_dev:
+                from app.services.connector_mode import disable_production_mock_connectors
+
+                disabled = disable_production_mock_connectors(db)
+                if disabled:
+                    logger.error("CONFIGURATION_ERROR: disabled %s production mock connector(s)", len(disabled))
     except Exception as exc:  # noqa: BLE001
         logger.warning("startup backfill failed: %s", exc)
     clock_stop = None
@@ -148,9 +154,9 @@ def create_app() -> FastAPI:
 
         run_alembic_upgrade_head()
 
-    # 生产环境强制要求 token 或 jwt_secret
-    if not settings.is_dev and not settings.api_token and not settings.jwt_secret:
-        logger.error("FATAL: API_TOKEN or JWT_SECRET must be set in production")
+    # 生产环境强制独立 JWT_SECRET（不得派生自 api_token，否则 api_token 泄露即可伪造 admin JWT）
+    if not settings.is_dev and not settings.jwt_secret:
+        logger.error("FATAL: JWT_SECRET must be independently set in production (not derived from API_TOKEN)")
         raise SystemExit(1)
 
     from fastapi.middleware.cors import CORSMiddleware

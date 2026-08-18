@@ -436,6 +436,13 @@ def _execute_write_tool(
             if missing_slots:
                 return _clarify(db, store_id, "prepare_action", arguments, missing_slots, "在准备动作之前，我需要确认：")
 
+            from app.services.action_capability import ActionCapabilityError, assert_action_executable, blocked_payload
+
+            try:
+                assert_action_executable(action_type)
+            except ActionCapabilityError:
+                return blocked_payload(action_type, tool="prepare_action")
+
             rec = Recommendation(
                 store_id=store_id,
                 scope="store",

@@ -68,17 +68,17 @@ def upsert_strategy_memory_from_experiment(db: Session, experiment: Experiment) 
         )
         reuse_when = f"当再次出现同类指标压力且对象类似时，优先复用 {view.action_type}。"
         avoid_when = None
-        tags = ["effective", view.metric, view.action_type]
+        tags = ["effective", view.metric, view.action_type, "observed"]
     elif view.result == "negative":
         lesson = f"「{view.action_type}」未带来正向结果，避免重复盲目执行。"
         reuse_when = "仅在根因变化或证据更强时谨慎重试。"
         avoid_when = f"在相似窗口内不要连续叠加 {view.action_type}。"
-        tags = ["ineffective", view.metric, view.action_type]
+        tags = ["ineffective", view.metric, view.action_type, "observed"]
     else:
         lesson = f"「{view.action_type}」效果不明显。"
         reuse_when = "可保留为低优先级备选。"
         avoid_when = "不要作为今日唯一主动作。"
-        tags = ["neutral", view.metric, view.action_type]
+        tags = ["neutral", view.metric, view.action_type, "observed"]
 
     # attribution_quality 降权：low 质量的实验结论可信度折半
     quality_multiplier = {"high": 1.0, "medium": 0.8, "low": 0.5}.get(view.attribution_quality, 0.8)
@@ -131,6 +131,12 @@ def load_strategy_memory(db: Session, store_id: str, limit: int = 20) -> Strateg
                 tags = json.loads(row.context_tags_json)
             except json.JSONDecodeError:
                 tags = []
+        kind = "observed"
+        lowered = {str(tag).strip().lower() for tag in tags}
+        if "incremental" in lowered:
+            kind = "incremental"
+        elif "attributed" in lowered:
+            kind = "attributed"
         item = StrategyMemoryItem(
             id=row.id,
             store_id=row.store_id,
@@ -143,6 +149,7 @@ def load_strategy_memory(db: Session, store_id: str, limit: int = 20) -> Strateg
             avoid_when=row.avoid_when,
             source_experiment_id=row.experiment_id,
             confidence=row.confidence,
+            evidence_kind=kind,  # type: ignore[arg-type]
             created_at=row.created_at,
         )
         items.append(item)

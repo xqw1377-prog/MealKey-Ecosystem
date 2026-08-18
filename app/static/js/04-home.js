@@ -349,15 +349,41 @@ function enrichBriefWithDashboard() {
 function renderStoreSelector() {
   const select = qs("#storeSelect");
   if (!select) return;
-  select.innerHTML = state.stores
-    .map((store) => {
-      const meta = [store.city, store.category].filter(Boolean).join(" · ");
-      const label = meta ? `${store.name} · ${meta}` : store.name;
-      return `<option value="${store.id}" ${store.id === state.currentStoreId ? "selected" : ""}>${escapeHtml(label)}</option>`;
-    })
-    .join("");
+  const groups = new Map();
+  state.stores.forEach((store) => {
+    const key = store.brand_id || store.merchant_id || "default";
+    const label = store.brand_name || store.merchant_name || "未分组品牌";
+    if (!groups.has(key)) groups.set(key, { label, stores: [] });
+    groups.get(key).stores.push(store);
+  });
+  const grouped = groups.size > 1 || [...groups.values()].some((group) => group.stores.length > 1);
+  if (!grouped) {
+    select.innerHTML = state.stores
+      .map((store) => {
+        const meta = [store.city, store.category].filter(Boolean).join(" · ");
+        const label = meta ? `${store.name} · ${meta}` : store.name;
+        return `<option value="${store.id}" ${store.id === state.currentStoreId ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+  } else {
+    select.innerHTML = [...groups.values()]
+      .map((group) => {
+        const options = group.stores
+          .map((store) => {
+            const meta = [store.city, store.area || store.category].filter(Boolean).join(" · ");
+            const label = meta ? `${store.name} · ${meta}` : store.name;
+            return `<option value="${store.id}" ${store.id === state.currentStoreId ? "selected" : ""}>${escapeHtml(label)}</option>`;
+          })
+          .join("");
+        return `<optgroup label="${escapeHtml(group.label)}">${options}</optgroup>`;
+      })
+      .join("");
+  }
   const bootstrapBtn = qs("#bootstrapBtn");
-  if (bootstrapBtn) bootstrapBtn.style.display = state.stores.length ? "none" : "";
+  if (bootstrapBtn) {
+    bootstrapBtn.style.display = "";
+    bootstrapBtn.textContent = state.stores.length ? "管理品牌与门店" : "+ 添加门店";
+  }
 }
 
 function renderTopbar() {

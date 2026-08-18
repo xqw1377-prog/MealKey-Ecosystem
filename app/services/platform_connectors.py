@@ -372,7 +372,10 @@ def post_platform_write(
     mode: str = "mock",
     external_store_id: str | None = None,
 ) -> dict[str, Any]:
-    """统一写回入口。mock 走内存菜单；http 打到对接层 /write。"""
+    """统一写回入口。mock 走内存菜单；http 打到对接层 /write。生产禁止 mock。"""
+    from app.services.connector_mode import assert_mode_allowed
+
+    mode = assert_mode_allowed(mode, explicit=True)
     if mode == "mock":
         if op == "update_product_title":
             return mock_write_product_title(
@@ -890,22 +893,27 @@ def fetch_platform_snapshot(
     platform: str,
     *,
     store_id: str,
-    mode: str = "mock",
+    mode: str | None = None,
     store_name: str | None = None,
     external_store_id: str | None = None,
     db: "Session | None" = None,
 ) -> PlatformSnapshot:
+    from app.services.connector_mode import assert_mode_allowed
+
+    resolved = assert_mode_allowed(mode, explicit=True)
     normalized = (platform or "meituan").strip().lower()
-    if mode == "http":
+    if resolved == "http":
         return fetch_http_snapshot(normalized, store_id=store_id, external_store_id=external_store_id)
-    if mode == "mobile":
+    if resolved == "mobile":
         return fetch_mobile_snapshot(normalized, store_id=store_id, db=db)
-    if mode == "oauth":
+    if resolved == "oauth":
         return fetch_oauth_snapshot(normalized, store_id=store_id, external_store_id=external_store_id)
     return fetch_mock_snapshot(normalized, store_name=store_name)
 
 
 def _load_oauth_meta(store_id: str, platform: str) -> dict[str, Any]:
+    from app.services.credential_store import load_oauth_credentials
+
     with SessionLocal() as db:
         row = (
             db.query(PlatformConnection)
@@ -913,11 +921,7 @@ def _load_oauth_meta(store_id: str, platform: str) -> dict[str, Any]:
             .order_by(PlatformConnection.created_at.desc())
             .first()
         )
-        if row is None or not row.meta_json:
-            return {}
-        try:
-            meta = json.loads(row.meta_json)
-        except json.JSONDecodeError:
-            return {}
-        oauth = meta.get("oauth") if isinstance(meta, dict) else None
-        return oauth if isinstance(oauth, dict) else {}
+        secret = load_oauth_credentials(db, store_id, platform, connection=row)
+        if row is not None:
+            db.commit()
+        return secret

@@ -102,6 +102,9 @@ async function init() {
   if (typeof loadOwnerProfile === "function") {
     loadOwnerProfile(state.currentStoreId).catch(() => null);
   }
+  if (typeof loadEnterpriseSettings === "function") {
+    loadEnterpriseSettings(state.currentStoreId).catch(() => null);
+  }
   if (typeof renderDataCoveragePanel === "function") renderDataCoveragePanel();
   if (typeof bindDecisionCoreButtons === "function") bindDecisionCoreButtons();
   if (typeof renderCostItemsPanel === "function") renderCostItemsPanel();

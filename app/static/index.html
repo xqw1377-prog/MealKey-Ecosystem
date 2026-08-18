@@ -89,7 +89,7 @@
         <div class="sidebar-section">
           <div class="sidebar-label">店铺切换</div>
           <select id="storeSelect" class="sidebar-select"></select>
-          <button id="bootstrapBtn" class="sidebar-link">+ 添加门店</button>
+          <button id="bootstrapBtn" class="sidebar-link">管理品牌与门店</button>
         </div>
 
         <div class="sidebar-guide">
@@ -1014,7 +1014,7 @@
       <section class="profile-modal-panel" role="dialog" aria-modal="true" aria-labelledby="ownerProfileTitle">
         <div class="profile-modal-head">
           <div>
-            <div class="section-kicker">账号与账单</div>
+            <div class="section-kicker">账号、企业与账单</div>
             <h2 id="ownerProfileTitle">个人资料</h2>
           </div>
           <button class="profile-modal-close" type="button" data-profile-modal-close aria-label="关闭">×</button>
@@ -1055,6 +1055,50 @@
             <button type="submit" class="topbar-button primary" id="ownerProfileSaveBtn">保存资料</button>
           </div>
         </form>
+        <form id="enterpriseSettingsForm" class="profile-form profile-enterprise" aria-labelledby="enterpriseSettingsTitle">
+          <div class="profile-section-head">
+            <strong id="enterpriseSettingsTitle">企业主体</strong>
+            <span>公司/商户主体。计费、多品牌、多门店都挂在这里</span>
+          </div>
+          <label class="profile-field">
+            <span>企业名称</span>
+            <input id="enterpriseNameInput" name="name" type="text" maxlength="200" placeholder="例如：上海餐钥餐饮管理有限公司" />
+          </label>
+          <label class="profile-field">
+            <span>所在地</span>
+            <input id="enterpriseLocationInput" name="location" type="text" maxlength="200" placeholder="城市或区域，例如：上海·静安" />
+          </label>
+          <p class="profile-store-hint" id="enterpriseOrgHint">还没有品牌和门店</p>
+          <div class="profile-modal-actions">
+            <button type="submit" class="topbar-button primary" id="enterpriseSaveBtn">保存企业主体</button>
+          </div>
+        </form>
+        <section class="profile-org" id="orgBrandPanel" aria-labelledby="orgBrandTitle">
+          <div class="profile-section-head">
+            <strong id="orgBrandTitle">品牌与门店</strong>
+            <span>一个企业可以有多个品牌，每个品牌可以有多家门店</span>
+          </div>
+          <div id="orgBrandList"></div>
+          <form id="orgNewBrandForm" class="profile-form profile-org-new">
+            <label class="profile-field">
+              <span>新品牌名</span>
+              <input id="orgNewBrandName" name="name" type="text" maxlength="200" placeholder="例如：餐钥小馆" required />
+            </label>
+            <div class="profile-field-row">
+              <label class="profile-field">
+                <span>品类</span>
+                <input id="orgNewBrandCategory" name="category" type="text" maxlength="100" placeholder="正餐 / 快餐" />
+              </label>
+              <label class="profile-field">
+                <span>菜系</span>
+                <input id="orgNewBrandCuisine" name="cuisine_type" type="text" maxlength="100" placeholder="川菜 / 本帮" />
+              </label>
+            </div>
+            <div class="profile-modal-actions">
+              <button type="submit" class="topbar-button primary" id="orgNewBrandSaveBtn">新增品牌</button>
+            </div>
+          </form>
+        </section>
         <section class="profile-bill" id="ownerBillPanel" aria-label="经营账单">
           <div class="profile-bill-head">
             <strong>经营服务费</strong>

@@ -175,7 +175,7 @@ def _metric_change_from_event(event: OperatingEvent, state: StoreState) -> float
 
 
 def _guess_subject(event: OperatingEvent, state: StoreState) -> OperatingObjectRef:
-    if event.event_type in {"CTR_DROP", "CVR_DROP", "HERO_SKU_SOLD_OUT"} and state.core_items:
+    if event.event_type in {"CTR_DROP", "CVR_DROP", "ORDER_DROP", "HERO_SKU_SOLD_OUT"} and state.core_items:
         hero = max(state.core_items, key=lambda item: item.order_share_pct or 0)
         return OperatingObjectRef(type="sku", id=hero.item_id, name=hero.name)
     return OperatingObjectRef(type="store", id=state.store.store_id, name=state.store.name)

@@ -18,5 +18,6 @@ data/
 *.log
 # Temp
 *.tmp
+*.bak
 SYNC_MARKER.txt
 .vercel

@@ -261,7 +261,7 @@ function renderAdsSummaryPanel() {
   const metrics = [
     { label: "日均花费", value: fmtMoney(ads.avg_daily_cost) },
     { label: "CPC", value: fmtMoney(ads.avg_cpc) + trendArrow(ads.cpc_trend_pct) },
-    { label: "ROAS", value: ads.avg_roas != null ? ads.avg_roas.toFixed(1) : "--" + trendArrow(ads.roas_trend_pct) },
+    { label: "ROAS", value: (ads.avg_roas != null ? ads.avg_roas.toFixed(1) : "--") + trendArrow(ads.roas_trend_pct) },
     { label: "广告订单", value: ads.total_ads_orders || "--" },
   ];
 

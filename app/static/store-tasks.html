@@ -46,11 +46,12 @@
         return;
       }
       lead.textContent = (data.manager_name || "店长") + " · 没有证据不能算做完";
-      if (!data.tasks.length) {
+      const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      if (!tasks.length) {
         list.innerHTML = '<div class="card">现在没有待做的线下整改。</div>';
         return;
       }
-      list.innerHTML = data.tasks.map((task) => `
+      list.innerHTML = tasks.map((task) => `
         <article class="card ${task.overdue ? "overdue" : ""}" data-id="${task.id}">
           <h2>${escapeHtml(task.title)}</h2>
           <p>${escapeHtml(task.judgment || task.finding || "")}</p>

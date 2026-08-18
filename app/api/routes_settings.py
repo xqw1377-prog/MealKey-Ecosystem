@@ -300,8 +300,18 @@ def update_ops_roster(store_id: str, payload: StoreOpsRosterUpdate, db: Session 
         raise HTTPException(status_code=404, detail="store not found")
     from app.services.store_ops import save_roster
 
-    roster = save_roster(db, store.id, payload.model_dump())
-    return {"store_ops": roster, "checklist": build_setup_checklist(db, store)}
+    try:
+        roster = save_roster(db, store.id, payload.model_dump())
+        # save_roster 会 commit，先重新加载再算清单，避免过期对象把设置页打成 500
+        store = _load_store(db, store.id)
+        checklist = build_setup_checklist(db, store)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc) if settings.is_dev else "保存门店执行人失败",
+        ) from exc
+    return {"store_ops": roster, "checklist": checklist}
 
 
 @router.get("/stores/{store_id}/owner")

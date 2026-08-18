@@ -2,6 +2,7 @@
 
 function renderFallbackCompetitionMap(payload, message) {
   const container = qs("#competitionMap");
+  if (!container) return;
   if (!payload) {
     container.innerHTML = `<div class="map-empty">${escapeHtml(message || "缺少门店经纬度，暂时无法生成竞争地图。")}</div>`;
     return;
@@ -31,7 +32,8 @@ function renderFallbackCompetitionMap(payload, message) {
       })
       .join("")}
   `;
-  if (message) qs("#competitionCollectionStatus").textContent = message;
+  const status = qs("#competitionCollectionStatus");
+  if (message && status) status.textContent = message;
 }
 
 async function renderCompetitionMap() {
@@ -41,12 +43,15 @@ async function renderCompetitionMap() {
   const pointCount = payload?.competitors?.length || 0;
   const schedule = collectionConfig?.schedule || "07:30";
   const scanButton = qs("#scanCompetitionBtn");
-  scanButton.disabled = !collectionConfig?.enabled;
-  scanButton.title = collectionConfig?.enabled ? "立即执行一次竞品扫描" : "请先配置高德或授权数据源";
+  if (scanButton) {
+    scanButton.disabled = !collectionConfig?.enabled;
+    scanButton.title = collectionConfig?.enabled ? "立即执行一次竞品扫描" : "请先配置高德或授权数据源";
+  }
 
   if (!payload) {
     renderFallbackCompetitionMap(null);
-    qs("#competitionCollectionStatus").textContent = "门店缺少经纬度或地图数据不可用。";
+    const status = qs("#competitionCollectionStatus");
+    if (status) status.textContent = "门店缺少经纬度或地图数据不可用。";
     return;
   }
   if (!amapConfig?.enabled) {
@@ -60,7 +65,8 @@ async function renderCompetitionMap() {
   try {
     const AMap = await loadAmapSdk(amapConfig);
     if (state.amapInstance) state.amapInstance.destroy();
-    qs("#competitionMap").innerHTML = "";
+    const mapHost = qs("#competitionMap");
+    if (mapHost) mapHost.innerHTML = "";
     const map = new AMap.Map("competitionMap", {
       zoom: 14,
       center: [payload.center_longitude, payload.center_latitude],
@@ -94,7 +100,8 @@ async function renderCompetitionMap() {
       }),
     );
     map.setFitView(markers, false, [40, 40, 40, 40]);
-    qs("#competitionCollectionStatus").textContent = `高德真实地图｜每日 ${schedule} 自动采集｜当前 ${pointCount} 个竞品`;
+    const liveStatus = qs("#competitionCollectionStatus");
+    if (liveStatus) liveStatus.textContent = `高德真实地图｜每日 ${schedule} 自动采集｜当前 ${pointCount} 个竞品`;
   } catch (error) {
     renderFallbackCompetitionMap(payload, `地图服务异常，已降级展示坐标：${error.message}`);
   }
@@ -872,7 +879,7 @@ function renderGrowthAgent() {
 }
 
 function renderInsightTiles() {
-  const dashboard = state.dashboard;
+  const dashboard = state.dashboard || {};
   const alignment = dashboard.document_alignment || {};
   const growth = dashboard.agents?.growth || {};
   const diagnosis = dashboard.agents?.diagnosis || {};
@@ -904,7 +911,9 @@ function renderInsightTiles() {
     },
   ];
 
-  qs("#insightTiles").innerHTML = tiles
+  const tilesHost = qs("#insightTiles");
+  if (!tilesHost) return;
+  tilesHost.innerHTML = tiles
     .map(
       (tile) => `
         <article class="insight-tile ${tile.tone}">
@@ -922,7 +931,7 @@ function renderInsightTiles() {
 }
 
 function renderCompetition() {
-  const dashboard = state.dashboard;
+  const dashboard = state.dashboard || {};
   const competition = dashboard.agents?.competition || dashboard.competition || {};
   const competitorPool = [...(competition.top_competitors || [])];
   if (state.competitionFilter === "change") {
@@ -935,17 +944,27 @@ function renderCompetition() {
     competitorPool.sort((left, right) => (right.score || 0) - (left.score || 0));
   }
   const competitors = takeTop(competitorPool, 3);
-  renderCompetitionMap();
-  qs("#competitionSummary").textContent =
+  if (typeof renderCompetitionMap === "function") {
+    Promise.resolve(renderCompetitionMap()).catch((error) => {
+      console.error("[MealKey] render competition map failed", error);
+    });
+  }
+  const summaryEl = qs("#competitionSummary");
+  if (summaryEl) summaryEl.textContent =
     competition.conclusion || competition.strategy || "周边证据还不够，先按商圈和价格带做稳妥判断。";
   const nearbyTotal = competition.nearby_total ?? (competition.top_competitors || []).length;
-  qs("#competitionFootnote").textContent = nearbyTotal
-    ? `这会儿重点盯着周边 ${nearbyTotal} 家同类商家`
-    : "周边竞品数据还在慢慢补齐";
+  const footnoteEl = qs("#competitionFootnote");
+  if (footnoteEl) {
+    footnoteEl.textContent = nearbyTotal
+      ? `这会儿重点盯着周边 ${nearbyTotal} 家同类商家`
+      : "周边竞品数据还在慢慢补齐";
+  }
 
+  const listEl = qs("#competitorList");
+  if (!listEl) return;
   if (!competitors.length) {
     const evidence = takeTop([...(competition.evidence || []), ...(competition.reasons || [])], 3);
-    qs("#competitorList").innerHTML = `
+    listEl.innerHTML = `
       <div class="competition-evidence-card">
         <div class="competition-evidence-head">
           <strong>竞品快照待补齐</strong>
@@ -963,7 +982,7 @@ function renderCompetition() {
     return;
   }
 
-  qs("#competitorList").innerHTML = competitors
+  listEl.innerHTML = competitors
     .map(
       (competitor, index) => `
         <div class="competitor-row">
@@ -1186,7 +1205,7 @@ function renderPlatformIntelPanel() {
 }
 
 function renderDailyBoard() {
-  const dashboard = state.dashboard;
+  const dashboard = state.dashboard || {};
   const metrics = dashboard.metrics || [];
   const gmv = metrics.find((item) => item.key === "gmv");
   const orders = metrics.find((item) => item.key === "orders");
@@ -1198,7 +1217,11 @@ function renderDailyBoard() {
   const trend = dashboard.trend || [];
   const lastDay = trend[trend.length - 1];
   const prevDay = trend[trend.length - 2];
-  qs("#yesterdayDate").textContent = lastDay && prevDay ? `${formatShortDate(lastDay.day)} vs ${formatShortDate(prevDay.day)}` : "昨日";
+  const yesterdayDate = qs("#yesterdayDate");
+  if (yesterdayDate) {
+    yesterdayDate.textContent =
+      lastDay && prevDay ? `${formatShortDate(lastDay.day)} vs ${formatShortDate(prevDay.day)}` : "昨日";
+  }
 
   const dailyCards = [
     { label: "订单量", key: "orders", value: orders?.value, delta: orders?.delta_pct },
@@ -1209,7 +1232,8 @@ function renderDailyBoard() {
     { label: "资料对齐", key: "score", value: dashboard.document_alignment?.alignment_score, delta: null, formatter: (value) => (value === null || value === undefined ? "--" : `${value} 分`) },
   ];
 
-  qs("#yesterdayMetrics").innerHTML = dailyCards
+  const yesterdayMetrics = qs("#yesterdayMetrics");
+  if (yesterdayMetrics) yesterdayMetrics.innerHTML = dailyCards
         .map(
           (item) => `
         <div class="mini-metric">
@@ -1222,7 +1246,8 @@ function renderDailyBoard() {
     .join("");
 
   const reasons = takeTop(dashboard.agents?.diagnosis?.reasons || dashboard.observations?.map((item) => item.what_happened) || [], 3);
-  qs("#yesterdayReasons").innerHTML = reasons.length
+  const yesterdayReasons = qs("#yesterdayReasons");
+  if (yesterdayReasons) yesterdayReasons.innerHTML = reasons.length
     ? reasons
         .map(
           (reason, index) => `
@@ -1290,7 +1315,7 @@ function renderStrategyMemory() {
 }
 
 function renderExperiments() {
-  const dashboard = state.dashboard;
+  const dashboard = state.dashboard || {};
   const summary = dashboard.execution_summary || {};
   const experiments = takeTop(dashboard.experiments || [], 3);
   const pills = [
@@ -1300,12 +1325,18 @@ function renderExperiments() {
     { label: `总实验 ${(dashboard.experiments || []).length}`, className: "total" },
   ];
 
-  qs("#executionSummary").innerHTML = pills
-    .map((pill) => `<div class="summary-pill ${pill.className}">${escapeHtml(pill.label)}</div>`)
-    .join("");
-  qs("#experimentTag").textContent = (dashboard.experiments || []).length ? "还在观察" : "还没开始";
+  const executionSummary = qs("#executionSummary");
+  if (executionSummary) {
+    executionSummary.innerHTML = pills
+      .map((pill) => `<div class="summary-pill ${pill.className}">${escapeHtml(pill.label)}</div>`)
+      .join("");
+  }
+  const experimentTag = qs("#experimentTag");
+  if (experimentTag) experimentTag.textContent = (dashboard.experiments || []).length ? "还在观察" : "还没开始";
 
-  qs("#experimentTracker").innerHTML = experiments.length
+  const experimentTracker = qs("#experimentTracker");
+  if (!experimentTracker) return;
+  experimentTracker.innerHTML = experiments.length
     ? experiments
         .map((experiment) => {
           const { from, to } = experimentWindowBounds(experiment);
@@ -1688,6 +1719,14 @@ function renderMatrixAgents() {
   MATRIX_AGENT_DEFS.forEach((item) => renderMatrixAgent(item.key));
 }
 
+function renderDashboardPanel(name, fn) {
+  try {
+    fn();
+  } catch (error) {
+    console.error(`[MealKey] render ${name} failed`, error);
+  }
+}
+
 function renderDashboard() {
   mergeRuntimeIntoBrief();
   // 首页只渲染三栏主舞台，避免整舱 Agent/实验面板白烧
@@ -1697,32 +1736,34 @@ function renderDashboard() {
   }
   ensureMatrixWorkspace();
   applyWorkspaceMode(state.activeWorkspace || "section-overview");
-  renderStoreSelector();
-  renderTopbar();
-  renderGuide();
-  renderManagerBrief();
-  renderEventDigest();
-  renderActionCenter();
-  renderCompetitionAgent();
-  renderMenuAgent();
-  renderProductAgent();
-  renderStorefrontAgent();
-  renderDiagnosisAgent();
-  renderGrowthAgent();
-  renderMatrixAgents();
-  renderStrategyMemory();
-  renderInsightTiles();
-  renderCompetition();
-  renderCollectionCenter();
-  renderAgentTeamRoster();
-  renderDailyBoard();
-  renderExperiments();
-  renderSettingsOverview();
-  renderHomeEventFeed();
-  renderWorthDoing();
-  renderAutoActivity();
-  renderVerifiedWins();
-  renderStoreProfileCard();
+  [
+    ["storeSelector", renderStoreSelector],
+    ["topbar", renderTopbar],
+    ["guide", renderGuide],
+    ["managerBrief", renderManagerBrief],
+    ["eventDigest", renderEventDigest],
+    ["actionCenter", renderActionCenter],
+    ["competitionAgent", renderCompetitionAgent],
+    ["menuAgent", renderMenuAgent],
+    ["productAgent", renderProductAgent],
+    ["storefrontAgent", renderStorefrontAgent],
+    ["diagnosisAgent", renderDiagnosisAgent],
+    ["growthAgent", renderGrowthAgent],
+    ["matrixAgents", renderMatrixAgents],
+    ["strategyMemory", renderStrategyMemory],
+    ["insightTiles", renderInsightTiles],
+    ["competition", renderCompetition],
+    ["collectionCenter", renderCollectionCenter],
+    ["agentTeamRoster", renderAgentTeamRoster],
+    ["dailyBoard", renderDailyBoard],
+    ["experiments", renderExperiments],
+    ["settingsOverview", renderSettingsOverview],
+    ["homeEventFeed", renderHomeEventFeed],
+    ["worthDoing", renderWorthDoing],
+    ["autoActivity", renderAutoActivity],
+    ["verifiedWins", renderVerifiedWins],
+    ["storeProfileCard", renderStoreProfileCard],
+  ].forEach(([name, fn]) => renderDashboardPanel(name, fn));
 }
 
 function renderMenuDeepDiagnosis() {
@@ -1778,23 +1819,27 @@ function renderSettingsOverview() {
   if (!overview) return;
 
   const checklist = overview.checklist || {};
-  qs("#settingsChecklist").innerHTML = (checklist.steps || [])
-    .map(
-      (step) => `
+  const checklistHost = qs("#settingsChecklist");
+  if (checklistHost) {
+    checklistHost.innerHTML = (checklist.steps || [])
+      .map(
+        (step) => `
         <article class="settings-check-item ${step.done ? "done" : ""}">
           <strong>${step.done ? "✓" : "○"} ${escapeHtml(step.title)}</strong>
           <p>${escapeHtml(step.hint)}</p>
         </article>
       `,
-    )
-    .join("");
+      )
+      .join("");
+  }
 
   const llm = overview.llm || {};
-  const guide = overview.ai?.platform || overview.ai?.deploy || {};
+  const rawGuide = overview.ai?.platform || overview.ai?.deploy || {};
+  const guide = { ...rawGuide };
   if (llm.configured) {
-    guide.summary = `内置大模型引擎已就绪（独立部署，不依赖主仓）。${guide.summary || ""}`.trim();
-  } else if (guide.summary) {
-    guide.summary = `大模型未配置，问答将走规则引擎；如需启用请在部署环境的 .env 中配置。${guide.summary}`.trim();
+    guide.summary = `内置大模型引擎已就绪（独立部署，不依赖主仓）。${rawGuide.summary || ""}`.trim();
+  } else if (rawGuide.summary) {
+    guide.summary = `大模型未配置，问答将走规则引擎；如需启用请在部署环境的 .env 中配置。${rawGuide.summary}`.trim();
   }
   showAssistGuide(guide);
 

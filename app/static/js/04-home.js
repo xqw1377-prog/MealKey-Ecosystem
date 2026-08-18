@@ -268,13 +268,23 @@ function toggleVoiceInput() {
 function renderHomeShell() {
   mergeRuntimeIntoBrief();
   applyWorkspaceMode(state.activeWorkspace || "section-overview");
-  renderStoreSelector();
-  renderTopbar();
-  renderOpsQueue();
-  if (typeof renderStoreProfileCard === "function") renderStoreProfileCard();
-  applyOwnerProfileUI(state.ownerProfile || state.settingsOverview?.owner);
-  if (typeof renderWalletBanner === "function") renderWalletBanner();
-  if (typeof renderAdsSummaryPanel === "function") renderAdsSummaryPanel();
+  const homePanels = [
+    ["storeSelector", renderStoreSelector],
+    ["topbar", renderTopbar],
+    ["opsQueue", renderOpsQueue],
+    ["storeProfileCard", typeof renderStoreProfileCard === "function" ? renderStoreProfileCard : null],
+    ["ownerProfile", () => applyOwnerProfileUI(state.ownerProfile || state.settingsOverview?.owner)],
+    ["walletBanner", typeof renderWalletBanner === "function" ? renderWalletBanner : null],
+    ["adsSummary", typeof renderAdsSummaryPanel === "function" ? renderAdsSummaryPanel : null],
+  ];
+  homePanels.forEach(([name, fn]) => {
+    if (typeof fn !== "function") return;
+    try {
+      fn();
+    } catch (error) {
+      console.error(`[MealKey] render home ${name} failed`, error);
+    }
+  });
 }
 
 function actionButtonConfig(action) {
@@ -450,28 +460,32 @@ function renderTopbar() {
 }
 
 function renderGuide() {
+  const stepEl = qs("#guideStep");
+  const barEl = qs("#guideProgressBar");
+  const hintEl = qs("#guideHint");
+  if (!stepEl || !barEl || !hintEl) return;
   const checklist = state.settingsOverview?.checklist;
   if (checklist) {
     const pending = (checklist.steps || []).find((step) => !step.done);
-    qs("#guideStep").textContent = `已完成 ${checklist.completed}/${checklist.total}`;
-    qs("#guideProgressBar").style.width = `${checklist.progress_pct || 0}%`;
-    qs("#guideHint").textContent = pending
+    stepEl.textContent = `已完成 ${checklist.completed}/${checklist.total}`;
+    barEl.style.width = `${checklist.progress_pct || 0}%`;
+    hintEl.textContent = pending
       ? `${pending.title}：${pending.hint}`
       : "基础设置已就绪，去执行今日动作或刷新诊断。";
     return;
   }
-  const dashboard = state.dashboard;
-  const alignment = dashboard?.document_alignment || {};
-  const summary = dashboard?.execution_summary || {};
+  const dashboard = state.dashboard || {};
+  const alignment = dashboard.document_alignment || {};
+  const summary = dashboard.execution_summary || {};
   const completed = [
     alignment.status === "aligned" || alignment.status === "partial",
-    !!dashboard?.today_action?.id,
+    !!dashboard.today_action?.id,
     (summary.executed || 0) > 0,
-    (dashboard?.experiments || []).length > 0,
+    (dashboard.experiments || []).length > 0,
   ].filter(Boolean).length;
-  qs("#guideStep").textContent = `已完成 ${completed}/4`;
-  qs("#guideProgressBar").style.width = `${25 * Math.max(1, completed)}%`;
-  qs("#guideHint").textContent = alignment.recommendations?.[0] || dashboard?.daily_brief?.reason || "先补齐资料，再执行今日动作。";
+  stepEl.textContent = `已完成 ${completed}/4`;
+  barEl.style.width = `${25 * Math.max(1, completed)}%`;
+  hintEl.textContent = alignment.recommendations?.[0] || dashboard.daily_brief?.reason || "先补齐资料，再执行今日动作。";
 }
 
 function agentCapabilityStatus(agentKey) {
@@ -3381,21 +3395,29 @@ function renderEventDigest() {
 }
 
 function renderActionCenter() {
-  const dashboard = state.dashboard;
+  const dashboard = state.dashboard || {};
   const brief = state.managerBrief;
   const actions = takeTop(dashboard.action_packages || dashboard.today_tasks || [], 3);
   const execution = dashboard.execution_summary || {};
-  qs("#actionSummaryMeta").textContent = brief?.primary_experiment_title
-    ? `主实验：${brief.primary_experiment_title}`
-    : `已做 ${execution.executed || 0} 条｜还在看 ${execution.pending_verification || 0} 条`;
-  qs("#actionTableFoot").textContent = `共 ${(dashboard.action_packages || dashboard.today_tasks || []).length || 0} 条候选，今天只盯主实验`;
+  const meta = qs("#actionSummaryMeta");
+  const foot = qs("#actionTableFoot");
+  const host = qs("#actionCenter");
+  if (meta) {
+    meta.textContent = brief?.primary_experiment_title
+      ? `主实验：${brief.primary_experiment_title}`
+      : `已做 ${execution.executed || 0} 条｜还在看 ${execution.pending_verification || 0} 条`;
+  }
+  if (foot) {
+    foot.textContent = `共 ${(dashboard.action_packages || dashboard.today_tasks || []).length || 0} 条候选，今天只盯主实验`;
+  }
+  if (!host) return;
 
   if (!actions.length) {
-    qs("#actionCenter").innerHTML = `<div class="empty-state">今天还没有主实验，先看上面的判断，或刷新增长策略。</div>`;
+    host.innerHTML = `<div class="empty-state">今天还没有主实验，先看上面的判断，或刷新增长策略。</div>`;
     return;
   }
 
-  qs("#actionCenter").innerHTML = actions
+  host.innerHTML = actions
     .map((action, index) => {
       const button = actionButtonConfig(action);
       const signal = workflowNote(action);

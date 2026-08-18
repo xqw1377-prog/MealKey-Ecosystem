@@ -170,6 +170,7 @@ body.view-home #mkWorkRail {
   background: linear-gradient(180deg, #f2efe9 0%, #ece8e1 100%);
   border-right: 1px solid var(--mk-line);
   overflow: hidden;
+  min-height: 0;
 }
 
 body.view-home .mk-work-head {
@@ -305,6 +306,7 @@ body.view-home .mk-home-main {
     var(--mk-stage);
   overflow: hidden;
   border: 0;
+  min-height: 0;
 }
 
 body.view-home .mk-chat-stage {
@@ -315,6 +317,8 @@ body.view-home .mk-chat-stage {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 body.view-home .mk-chat-thread:empty {
@@ -322,9 +326,10 @@ body.view-home .mk-chat-thread:empty {
 }
 
 body.view-home .mk-home-main:has(.mk-chat-thread:empty) .mk-chat-stage {
-  flex: 0 0 auto;
-  min-height: auto;
-  padding-bottom: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
 }
 
 body.view-home .mk-guide-area {
@@ -482,6 +487,9 @@ body.view-home.path-exclusive .mk-chat-stage {
   max-width: none !important;
   padding-top: 20px !important;
   padding-bottom: 8px !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 body.view-home.interviewing .mk-guide.interview .mk-ai-intro,

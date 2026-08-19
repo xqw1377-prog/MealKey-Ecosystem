@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     platform_connector_url: str = ""
     platform_connector_token: str = ""
 
+    # TEST-ADAPTER-01 only. Default off. Never a production datasource.
+    daily_report_test_enabled: bool = False
+    daily_report_test_base_url: str = ""
+
     # LLM（主仓智能引擎配置；密钥放 .env，勿提交）
     deepseek_api_key: str = ""
     qwen_api_key: str = ""

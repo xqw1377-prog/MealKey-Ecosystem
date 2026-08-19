@@ -183,6 +183,8 @@ def resolve_connector(db: Session, store_id: str) -> ConnectorTarget:
     connector_url = str(settings.platform_connector_url or "").strip()
     from app.services.seed_store import is_seed_store
 
+    if requested == "daily_report_test":
+        raise WritePermissionError("TEST-ADAPTER-01 writeback is disabled")
     if is_seed_store(db, store_id):
         mode = "human_paste"
     elif requested == "human_paste":

@@ -11,7 +11,16 @@ from typing import Iterable, Optional
 from sqlalchemy import and_
 
 NEVER_PRODUCTION_TRUTH = frozenset(
-    {"synthetic", "mock", "fixture", "sandbox", "legacy_unknown_source", "invalid_reconciliation"}
+    {
+        "synthetic",
+        "mock",
+        "fixture",
+        "sandbox",
+        "legacy_unknown_source",
+        "invalid_reconciliation",
+        "test_only",
+        "external_daily_report_test",
+    }
 )
 LEGACY_UNKNOWN_SOURCE = "legacy_unknown_source"
 
@@ -31,6 +40,8 @@ SOURCE_PRIORITY: dict[str, int] = {
     "fixture": 0,
     "sandbox": 0,
     "invalid_reconciliation": 0,
+    "test_only": 0,
+    "external_daily_report_test": 0,
 }
 
 SOURCE_CONFIDENCE: dict[str, float] = {
@@ -49,6 +60,8 @@ SOURCE_CONFIDENCE: dict[str, float] = {
     "fixture": 0.0,
     "sandbox": 0.0,
     "invalid_reconciliation": 0.0,
+    "test_only": 0.0,
+    "external_daily_report_test": 0.0,
 }
 
 
@@ -69,6 +82,8 @@ def normalize_source(raw: Optional[str]) -> str:
         "fixture": "fixture",
         "sandbox": "sandbox",
         "invalid_reconciliation": "invalid_reconciliation",
+        "test_only": "test_only",
+        "external_daily_report_test": "external_daily_report_test",
     }
     if not key:
         return LEGACY_UNKNOWN_SOURCE

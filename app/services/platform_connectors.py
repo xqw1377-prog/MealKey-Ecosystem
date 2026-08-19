@@ -376,6 +376,10 @@ def post_platform_write(
     from app.services.connector_mode import assert_mode_allowed
 
     mode = assert_mode_allowed(mode, explicit=True)
+    if mode == "daily_report_test":
+        from app.services.action_capability import BLOCKED_NOT_IMPLEMENTED
+
+        raise ValueError(f"{BLOCKED_NOT_IMPLEMENTED}: TEST-ADAPTER-01 writeback is disabled")
     if mode == "mock":
         if op == "update_product_title":
             return mock_write_product_title(

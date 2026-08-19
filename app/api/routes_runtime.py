@@ -226,6 +226,9 @@ def _build_workspace_payload(store_id: str, db: Session) -> dict[str, Any]:
                 "candidate_count": len(runtime_bridge_result.candidate_odos) if runtime_bridge_result else 0,
             },
         },
+        # canonical brief：与 left/center/right 同一次构建、同一个 POIE run。
+        # 首页只调这一个 API；manager_brief 单独端点保留给非首页消费者。
+        "brief": brief.model_dump(mode="json"),
     }
     if not (queue.need_you and _is_understanding_card(queue.need_you[0])):
         try:
@@ -495,6 +498,23 @@ def _need_you_guide(card) -> dict[str, Any]:
     }
 
 
+#: 「现在」中栏的唯一仲裁顺序（排他契约）。
+#: 前端 currentNeedCard() 的优先级与此对齐；closed_loop 只能通过
+#: apply_loop_to_workspace 改写 decision_flow 的 now（仍是本顺序的第 3 层），
+#: 不得另立仲裁。任何新来源想进「现在」必须先在这里登记层级。
+GUIDE_ARBITRATION_ORDER: tuple[str, ...] = (
+    "understanding",   # 1. MUE 访谈/MOS 缺口 — Safe Mode 时独占
+    "protect_quiet",   # 2. 高峰保护/静默 — 只放行 human 类 anomaly
+    "decision_flow",   # 3. 决策流 now(含 closed_loop 投影)
+    "need_you",        # 4. POIE need_you
+    "bridge_human",    # 5. runtime bridge human 类
+    "flow_guide",      # 6. 决策流 guide
+    "bridge",          # 7. runtime bridge 其余
+    "active_goal",     # 8. Goal 进度
+    "info",            # 9. 空态
+)
+
+
 def _build_guide(
     queue,
     runtime_bridge_result=None,
@@ -505,6 +525,7 @@ def _build_guide(
 
     材料 §十六：Guide Type 只有 QUESTION/APPROVAL/FILE_REQUEST/PLAN_REVIEW/RESULT/PROGRESS/INFO。
     访谈 / MOS 缺口优先；高峰保护与静默时段不让增长类 bridge 抢戏。
+    仲裁顺序见 GUIDE_ARBITRATION_ORDER —— 这是「现在」的唯一排他契约。
     """
     from app.services.decision_flow import attach_decision_flow
 

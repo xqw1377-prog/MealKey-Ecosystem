@@ -290,6 +290,11 @@ async function loadHomeWorkspace(storeId) {
   state.understanding = understanding;
   state.platformLinks = platformLinks?.links || [];
   if (commercialBoard) state.commercialBoard = commercialBoard;
+  // canonical source：brief 直接取自 workspace（同一个 POIE run），
+  // 不再单独 fetch manager_brief —— 消灭两次 POIE 执行互相漂移。
+  if (runtimeWorkspace?.brief) {
+    state.managerBrief = runtimeWorkspace.brief;
+  }
   state.dashboard = {
     ...(state.dashboard || {}),
     store:
@@ -298,6 +303,10 @@ async function loadHomeWorkspace(storeId) {
       { id: storeId, name: "门店" },
     experiments: state.dashboard?.experiments || [],
     question_examples: state.dashboard?.question_examples || [],
+    // brief 已就位时同步 store_state 关键字段，避免 stub 回退显示 "--"
+    store_state: state.managerBrief
+      ? state.dashboard?.store_state || { kpis: {}, profit: state.managerBrief.profit_summary }
+      : state.dashboard?.store_state,
   };
   await pollStoreNotifications(storeId);
   renderHomeShell();

@@ -1283,11 +1283,25 @@ async function askStoreManager(question, options = {}) {
         return res.json();
       })();
     } else {
-      // 访谈态优先走 MUE interview；其余统一 /v1/intent，失败再 ask
+      // MUE 访谈门：看 understanding 状态本身（safe mode / MOS 未满足 / 有 blocking gaps），
+      // 不看当前聚焦卡片 —— 否则用户聚焦工作卡时随口一句会绕过访谈直进 /v1/intent，
+      // 老板的回答进了店长但理解层不更新。
+      const mue = state.understanding || {};
+      const mueGateOpen =
+        document.body.classList.contains("interviewing") ||
+        document.body.classList.contains("path-exclusive") ||
+        mue.system_mode === "safe" ||
+        mue.mos_satisfied === false ||
+        (Array.isArray(mue.mos_blocking_fields) && mue.mos_blocking_fields.length > 0) ||
+        interviewGapKeys().length > 0;
       const focusCard = currentNeedCard();
-      if (isUnderstandingCard(focusCard)) {
+      if (mueGateOpen) {
         try {
-          const key = interviewKind(focusCard);
+          // 访谈 key：优先聚焦卡上的，否则从 open gaps 取第一个
+          const key =
+            (isUnderstandingCard(focusCard) ? interviewKind(focusCard) : "") ||
+            interviewGapKeys()[0] ||
+            "priority_style";
           response = await fetchJson(
             `/stores/${state.currentStoreId}/understanding/interview`,
             {

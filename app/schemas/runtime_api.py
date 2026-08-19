@@ -54,6 +54,10 @@ class WorkspaceRuntimeResponse(BaseModel):
     center: RuntimeCenterPanel
     right: RuntimeRightPanel
     meta: RuntimeMetaPanel
+    # canonical brief：workspace 是首页唯一权威数据源。
+    # 前端不再单独 fetch manager_brief（避免两次 POIE 执行互相漂移），
+    # home 路径的 state.managerBrief 直接取自这里。
+    brief: Optional[dict[str, Any]] = None
 
 
 class DailyPlanResponse(BaseModel):

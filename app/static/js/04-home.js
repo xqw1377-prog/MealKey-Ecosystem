@@ -2798,20 +2798,29 @@ function runtimeFeedSubtitle() {
 }
 
 function renderOpsQueue() {
+  // 崩溃域隔离：每个子渲染块独立 try/catch —— 单块失败只降级该块，不拖垮整页
+  const safe = (label, fn) => {
+    try {
+      fn();
+    } catch (error) {
+      console.warn(`[renderOpsQueue] ${label} failed:`, error);
+    }
+  };
+
   const brief = state.managerBrief || {};
   const storeName = brief.store_name || state.dashboard?.store?.name || "门店";
   const storeEl = qs("#focusStoreName");
   if (storeEl) storeEl.textContent = storeName;
-  applyOwnerProfileUI(state.ownerProfile || state.settingsOverview?.owner);
+  safe("ownerProfile", () => applyOwnerProfileUI(state.ownerProfile || state.settingsOverview?.owner));
 
   const card = currentNeedCard();
   const interviewing = isUnderstandingCard(card);
   // 访谈/确认路径：独占中栏，聊天线程与其他模块退出
   if (interviewing) {
-    enterExclusivePathMode();
+    safe("exclusivePath", () => enterExclusivePathMode());
   } else {
     if (document.body.classList.contains("path-exclusive") || document.body.classList.contains("interviewing")) {
-      exitExclusivePathMode();
+      safe("exitExclusivePath", () => exitExclusivePathMode());
     }
     document.body.classList.toggle(
       "home-chat-open",
@@ -2833,11 +2842,11 @@ function renderOpsQueue() {
       !(state.chatMessages || []).some((m) => m.pending);
   }
 
-  renderDecisionHost(card);
-  renderHomeChatThread();
-  renderWorkRail();
-  renderContextRail();
-  syncCommandBarForFocus(card);
+  safe("decisionHost", () => renderDecisionHost(card));
+  safe("chatThread", () => renderHomeChatThread());
+  safe("workRail", () => renderWorkRail());
+  safe("contextRail", () => renderContextRail());
+  safe("commandBar", () => syncCommandBarForFocus(card));
 }
 
 function renderRecordWorkspace() {

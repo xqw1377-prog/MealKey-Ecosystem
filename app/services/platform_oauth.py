@@ -85,20 +85,64 @@ def _load_oauth_config(platform: str) -> Optional[OAuthConfig]:
     )
 
 
+_OAUTH_STATE_TTL_SECONDS = 600  # state 10 分钟过期
+
+
+def _oauth_signing_secret() -> bytes:
+    """state 签名密钥：优先 jwt_secret，其次 api_token。两者都没有 → 拒签（fail-closed）。"""
+    from app.core.config import settings
+
+    secret = (settings.jwt_secret or settings.api_token or "").strip()
+    if not secret:
+        raise RuntimeError("OAuth state signing requires JWT_SECRET or API_TOKEN")
+    return f"oauth-state:{secret}".encode("utf-8")
+
+
+def _sign_state_payload(raw: bytes) -> str:
+    import hashlib
+    import hmac
+
+    return hmac.new(_oauth_signing_secret(), raw, hashlib.sha256).hexdigest()
+
+
 def build_oauth_state(platform: str, *, store_id: str = "") -> str:
-    payload = {"platform": platform, "store_id": store_id or "", "issued_at": datetime.now(timezone.utc).isoformat()}
+    """构造带 HMAC 签名 + 过期时间的 state（防伪造/防重放）。"""
+    payload = {
+        "platform": platform,
+        "store_id": store_id or "",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+    }
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii")
+    signature = _sign_state_payload(raw)
+    envelope = json.dumps({"payload": base64.urlsafe_b64encode(raw).decode("ascii"), "sig": signature}).encode("utf-8")
+    return base64.urlsafe_b64encode(envelope).decode("ascii")
 
 
 def parse_oauth_state(state: str) -> dict[str, str]:
+    """验签 + 过期校验。签名不符或超时 → 空结果（fail-closed）。"""
+    empty = {"platform": "", "store_id": ""}
     try:
-        raw = base64.urlsafe_b64decode(state.encode("ascii"))
+        envelope = json.loads(base64.urlsafe_b64decode(state.encode("ascii")).decode("utf-8"))
+        raw = base64.urlsafe_b64decode(envelope["payload"].encode("ascii"))
+        expected_sig = _sign_state_payload(raw)
+        import hmac as _hmac
+
+        if not _hmac.compare_digest(envelope.get("sig", ""), expected_sig):
+            return empty
         payload = json.loads(raw.decode("utf-8"))
-    except Exception:  # noqa: BLE001
-        return {"platform": "", "store_id": ""}
+    except Exception:  # noqa: BLE001 — 含签名密钥缺失: fail-closed 返回空
+        return empty
     if not isinstance(payload, dict):
-        return {"platform": "", "store_id": ""}
+        return empty
+    # 过期校验
+    try:
+        issued = datetime.fromisoformat(payload.get("issued_at", ""))
+        if issued.tzinfo is None:
+            issued = issued.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - issued).total_seconds() > _OAUTH_STATE_TTL_SECONDS:
+            return empty
+    except (ValueError, TypeError):
+        return empty
     return {
         "platform": str(payload.get("platform") or ""),
         "store_id": str(payload.get("store_id") or ""),

@@ -2254,8 +2254,13 @@ body.view-home .command-bar-titles {
     right: 16px;
   }
 
-  body.view-home #mkWorkRail,
-  body.view-home #mkContextRail {
+  /* v2 用 transform 抽屉管理 #mkContextRail（right-rail-open）；
+     v1 若再 display:none !important 会把 v2 的抽屉一起吃掉 → 手机「日记」打不开。
+     这里只藏左栏；右栏交给 v2 的 translateX 抽屉。 */
+  body.view-home #mkWorkRail {
+    display: none !important;
+  }
+  body.view-home:not(.right-rail-open) #mkContextRail {
     display: none !important;
   }
 

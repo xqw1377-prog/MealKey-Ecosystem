@@ -102,6 +102,7 @@ function openMobilePanel(panel) {
 function setRightRailOpen(open) {
   state.rightRailOpen = Boolean(open);
   document.body.classList.toggle("right-rail-open", state.rightRailOpen);
+  try { localStorage.setItem("mk_right_rail_open", state.rightRailOpen ? "1" : "0"); } catch (_) { /* ignore */ }
   const rightColumn = qs("#rightColumn");
   if (rightColumn) {
     rightColumn.dataset.collapsed = state.rightRailOpen ? "false" : "true";
@@ -239,12 +240,17 @@ function initOpsRailCollapsed() {
     return;
   }
   let collapsed = false;
+  let rightOpen = false;
   try {
     collapsed = localStorage.getItem("mk_ops_rail_collapsed") === "1";
+    // 整页刷新不再把右栏(经营日记)关掉 — 桌面端恢复用户上次的选择
+    rightOpen = localStorage.getItem("mk_right_rail_open") === "1";
   } catch (_) {
     collapsed = false;
+    rightOpen = false;
   }
   setOpsRailCollapsed(collapsed);
+  setRightRailOpen(rightOpen);
 }
 
 function setSidebarOpen(open) {

@@ -25,6 +25,7 @@ from app.api.routes_speech import router as speech_router
 from app.api.routes_store import router as store_router
 from app.api.routes_workspace import router as workspace_router
 from app.api.routes_data_acquisition import router as data_acquisition_router
+from app.api.routes_growth import router as growth_router
 from app.core.config import settings
 
 
@@ -52,6 +53,7 @@ def iter_api_routers() -> list[tuple[APIRouter, str, list[str]]]:
         (cases_router, "", ["cases"]),
         (governance_router, "", ["governance"]),
         (ops_router, "", ["ops-diagnosis"]),
+        (growth_router, "", ["growth"]),
     ]
     if settings.is_dev:
         routers.insert(3, (dev_router, "/dev", ["dev"]))

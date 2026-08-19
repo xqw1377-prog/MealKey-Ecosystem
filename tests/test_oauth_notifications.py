@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,16 @@ from app.models.entities import Merchant, Store
 from app.models.notification import Notification
 from app.services.notification_service import flush_queued_notifications, notify_store_owner
 from app.services.platform_oauth import build_oauth_state, parse_oauth_state, persist_oauth_connection
+
+
+@pytest.fixture(autouse=True)
+def _oauth_signing_secret(monkeypatch):
+    """state 现在要求 HMAC 签名 — 测试环境注入密钥。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
+    monkeypatch.setattr(settings, "api_token", "test-api-token", raising=False)
+    yield
 
 
 def _session() -> Session:

@@ -3,7 +3,7 @@
 核心断言：**只有满足生产 Truth 条件的 funnel 数据，才能被 attribution 看见。**
 
 `production_funnel_clause(data_source)` 排除：NULL（历史未知来源）、空串、
-以及 `NEVER_PRODUCTION_TRUTH = {synthetic, mock, fixture, sandbox, legacy_unknown_source}`。
+以及 `NEVER_PRODUCTION_TRUTH`（synthetic / mock / fixture / sandbox / legacy_unknown_source / test_only / external_daily_report_test）。
 `seed_demo` 的 funnel 现显式标 `synthetic` —— 不进 Truth，永不伪装真实来源。
 
 四个场景把「No Provenance = No Truth」从代码层锁死为回归：
@@ -177,6 +177,22 @@ def test_truth_synthetic_provenance_excluded() -> None:
     db.commit()
     db.refresh(exp)
     assert exp.result == "unknown"
+
+
+# ── 场景 2b：TEST-ADAPTER-01 provenance 与 synthetic 同类，生产不可见 ──
+
+def test_truth_test_only_provenance_excluded() -> None:
+    db = _session()
+    store_id, item_id = _build_store_with_funnel(db, data_source="test_only")
+    w = _calc_window(7)
+
+    assert _item_funnel_observed(db, item_id, w.observe_from, w.observe_to) is False
+
+    exp = _pending_ctr_experiment(db, store_id, item_id)
+    outcome = evaluate_experiment(db, exp, days=7)
+    assert outcome.skipped
+    assert outcome.reason == "funnel_missing"
+    assert outcome.result == "unknown"
 
 
 # ── 场景 3：data_source=authorized_session → observed available ──

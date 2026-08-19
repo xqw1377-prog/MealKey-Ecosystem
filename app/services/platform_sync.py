@@ -69,8 +69,16 @@ def apply_platform_snapshot(db: Session, store: Store, snapshot: PlatformSnapsho
         created_or_updated += 1
 
     metric_days = 0
+    raw_meta = snapshot.raw if isinstance(snapshot.raw, dict) else {}
+    test_only_snapshot = raw_meta.get("truth_eligible") is False or raw_meta.get("provenance") == "TEST_ONLY"
+    if test_only_snapshot:
+        from app.services.daily_report_test_connector import incoming_funnel_source_for_snapshot
+
+        incoming_source_default = incoming_funnel_source_for_snapshot(snapshot)
+    else:
+        incoming_source_default = "synthetic" if snapshot.synthetic else "platform_sync"
     for metric in snapshot.daily_metrics:
-        incoming_source = "synthetic" if snapshot.synthetic else "platform_sync"
+        incoming_source = incoming_source_default
         existing = db.execute(
             select(ShopFunnelDaily).where(ShopFunnelDaily.store_id == store.id, ShopFunnelDaily.day == metric.day)
         ).scalar_one_or_none()

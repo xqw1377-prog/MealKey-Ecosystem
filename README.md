@@ -123,6 +123,20 @@ curl http://127.0.0.1:8000/public/health
 
 > 美团/饿了么官方经营 API 需商家授权；竞品菜单与评价不得绕过登录抓取。竞品可用高德发现、授权快照或持牌 Partner。
 
+### TEST-ADAPTER-01（仅 DEV/TEST，不是 DATA-AS-01）
+
+`DailyReportTestConnector` 是产品锁定的日报夹具：第三方日报 → 适配 → 不完整 `PlatformSnapshot` / Facts → `StoreState(test)` → POIE → ODO。
+
+- **不是** 生产 Connector，**不可晋升**。`truth_eligible=false`，`provenance=TEST_ONLY`，写回禁用。
+- **不** 接入 `AuthorizedSessionConnector`，也不是美团/饿了么官方连接器。
+- Canonical `impressions` / `visits` / `orders` / `gmv` 保持 UNKNOWN，禁止用进店率 × 曝光反推绝对值。
+- 默认关闭。`APP_ENV=prod` fail-closed。详见 [`docs/test_adapter_01_daily_report.md`](docs/test_adapter_01_daily_report.md)。
+
+```text
+DAILY_REPORT_TEST_ENABLED=0
+DAILY_REPORT_TEST_BASE_URL=
+```
+
 ### 核心能力
 
 - **MealKey AI 店长（Chief Agent）**：老板只面对一个店长 agent，它用原生 function calling（ReAct 模式）按需调度 12 个专业 agent，把结果汇总成「先结论→理由→动作→预期影响」的回答。`POST /workspace/stores/{store_id}/ask`。LLM 未配置时自动降级到规则意图分类 + agent 调用，保证可用性。

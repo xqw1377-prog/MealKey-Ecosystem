@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 
 MOCK_MODES = frozenset({"mock", "fixture", "sandbox"})
-ALLOWED_MODES = frozenset({"mock", "http", "mobile", "oauth", "human_paste"})
+TEST_ONLY_MODES = frozenset({"daily_report_test"})
+ALLOWED_MODES = frozenset({"mock", "http", "mobile", "oauth", "human_paste", "daily_report_test"})
 
 CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
 PLATFORM_UNAVAILABLE = "PLATFORM_UNAVAILABLE"
@@ -44,6 +45,11 @@ def assert_mode_allowed(mode: str | None, *, explicit: bool = False) -> str:
         raise ConnectorModeError(CONFIGURATION_ERROR, f"不支持的 connector mode: {requested}")
     if requested in MOCK_MODES and not allows_mock():
         raise ConnectorModeError(CONFIGURATION_ERROR, "生产环境禁止 Mock，且绝不能 fallback 到 Mock。")
+    if requested in TEST_ONLY_MODES and not allows_mock():
+        raise ConnectorModeError(
+            CONFIGURATION_ERROR,
+            "生产环境禁止未认证日报测试源（TEST-ADAPTER-01），且绝不能 fallback。",
+        )
     return requested
 
 
@@ -79,10 +85,11 @@ def disable_production_mock_connectors(db: Session) -> list[str]:
     disabled: list[str] = []
     for row in rows:
         mode = str(row.connector_mode or "").strip().lower()
-        if mode not in MOCK_MODES:
+        if mode not in MOCK_MODES and mode not in TEST_ONLY_MODES:
             continue
         row.status = "disabled"
-        row.last_error = f"{CONFIGURATION_ERROR}: production forbids mock"
+        reason = "production forbids unauthenticated daily-report test source" if mode in TEST_ONLY_MODES else "production forbids mock"
+        row.last_error = f"{CONFIGURATION_ERROR}: {reason}"
         db.add(row)
         disabled.append(row.id)
     if disabled:

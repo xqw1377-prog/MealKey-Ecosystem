@@ -2128,6 +2128,26 @@ def get_mobile_connect_code(store_id: str, code: str, db: Session = Depends(get_
 def list_platform_links(store_id: str, db: Session = Depends(get_db)):
     from app.models.settings import PlatformConnection
 
+    def _test_preview(row: PlatformConnection) -> dict[str, Any] | None:
+        if row.connector_mode != "daily_report_test":
+            return None
+        try:
+            meta = json.loads(row.meta_json) if row.meta_json else {}
+        except json.JSONDecodeError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        return {
+            "truth_eligible": bool(meta.get("truth_eligible")),
+            "provenance": meta.get("provenance"),
+            "writeback": meta.get("writeback"),
+            "record_count": meta.get("record_count"),
+            "latest_record_date": meta.get("latest_record_date"),
+            "latest_record": meta.get("latest_record") or {},
+            "remote_store_name": meta.get("remote_store_name"),
+            "remote_store_id": meta.get("remote_store_id"),
+        }
+
     store = _load_store(db, store_id)
     if store is None:
         raise HTTPException(status_code=404, detail="store not found")
@@ -2143,6 +2163,7 @@ def list_platform_links(store_id: str, db: Session = Depends(get_db)):
                 "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
                 "connected_at": row.connected_at.isoformat() if row.connected_at else None,
                 "auth_expires_at": row.auth_expires_at.isoformat() if row.auth_expires_at else None,
+                "test_preview": _test_preview(row),
             }
             for row in rows
         ],

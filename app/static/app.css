@@ -6925,6 +6925,14 @@ body.view-home .workspace-deck,
   gap: 12px;
 }
 
+.settings-card > .topbar-button,
+.settings-card > .action-button,
+.settings-card > button {
+  justify-self: start;
+  width: auto;
+  max-width: 100%;
+}
+
 .settings-card-hint {
   margin: 0;
   color: var(--muted);

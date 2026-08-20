@@ -90,6 +90,60 @@ async function diagnoseProfit(current, baseline, ordersCurrent, ordersBaseline) 
   }
 }
 
+function firstNumericValue(...values) {
+  for (const value of values) {
+    const num = Number(value);
+    if (value !== null && value !== undefined && Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+function normalizeProfitDiagnosisSample(sample) {
+  if (!sample || typeof sample !== "object") return null;
+  const normalized = {
+    gmv: firstNumericValue(sample.gmv, sample.gross_gmv, sample.customer_paid),
+    commission: firstNumericValue(sample.commission, sample.platform_commission),
+    merchant_subsidy: firstNumericValue(
+      sample.merchant_subsidy,
+      sample.subsidy,
+      sample.subsidy_amount,
+    ),
+    ads: firstNumericValue(sample.ads, sample.ads_spend, sample.ad_spend),
+    food_cost: firstNumericValue(sample.food_cost, sample.food_cost_total),
+    packaging_cost: firstNumericValue(
+      sample.packaging_cost,
+      sample.packaging_cost_total,
+    ),
+  };
+  return Object.values(normalized).some((value) => value != null) ? normalized : null;
+}
+
+function buildProfitDiagnosisInput(profit) {
+  const current = normalizeProfitDiagnosisSample(profit);
+  const baselineSource =
+    profit?.baseline ||
+    profit?.baseline_period ||
+    profit?.previous_period ||
+    profit?.prior_period ||
+    profit?.compare_period ||
+    null;
+  const baseline = normalizeProfitDiagnosisSample(baselineSource);
+  return {
+    current,
+    baseline,
+    ordersCurrent: firstNumericValue(
+      profit?.orders,
+      profit?.order_count,
+      profit?.completed_orders,
+    ),
+    ordersBaseline: firstNumericValue(
+      baselineSource?.orders,
+      baselineSource?.order_count,
+      baselineSource?.completed_orders,
+    ),
+  };
+}
+
 /* ── Execution Plan: 推荐预览 (diff) ── */
 
 async function previewRecommendation(recId) {
@@ -144,6 +198,7 @@ async function rollbackRecommendation(recId) {
 async function renderDataCoveragePanel() {
   const host = qs("#mkDataCoveragePanel");
   if (!host) return;
+  const testLinks = typeof dailyReportTestLinks === "function" ? dailyReportTestLinks() : [];
   const seed = typeof fetchSeedLaunch === "function" ? await fetchSeedLaunch() : null;
   const steps = seed?.onboarding?.steps || [];
   if (steps.length) {
@@ -205,11 +260,26 @@ async function renderDataCoveragePanel() {
   }
   const coverage = await fetchDataCoverage();
   const costCoverage = await fetchCostCoverage();
-  if (!coverage && !costCoverage) {
-    host.innerHTML = "";
-    return;
-  }
   const items = [];
+  if (testLinks.length) {
+    const lead = [...testLinks].sort((a, b) =>
+      String(b?.test_preview?.latest_record_date || "").localeCompare(
+        String(a?.test_preview?.latest_record_date || ""),
+      ),
+    )[0];
+    const preview = lead?.test_preview || {};
+    const latest = preview.latest_record || {};
+    const chips = [
+      preview.latest_record_date ? `🧪 测试源 ${preview.latest_record_date}` : "🧪 测试源已接入",
+      latest.exposure != null ? `曝光 ${latest.exposure}` : null,
+      latest.entry_rate != null ? `进店率 ${latest.entry_rate}%` : null,
+      latest.order_rate != null ? `下单率 ${latest.order_rate}%` : null,
+      latest.store_rating != null ? `评分 ${latest.store_rating}` : null,
+    ].filter(Boolean);
+    items.push(
+      ...chips.map((label) => `<span class="coverage-chip warn">${escapeHtml(label)}</span>`),
+    );
+  }
   if (coverage) {
     if (coverage.funnel_days > 0)
       items.push(`<span class="coverage-chip ${coverage.funnel_days >= 7 ? "ok" : "warn"}">📊 ${coverage.funnel_days} 天经营数据</span>`);
@@ -225,10 +295,19 @@ async function renderDataCoveragePanel() {
       items.push(`<span class="coverage-chip ${costClass}">🍽️ ${coverage.items_with_cost}/${coverage.menu_items} 商品有成本 (${costPct.toFixed(0)}%)</span>`);
     }
   }
-  if (!items.length) {
-    host.innerHTML = `<span class="coverage-chip missing">⚠ 尚无真实数据，利润为代理估算。点「导入经营数据」上传平台导出。</span>`;
+  if (!coverage && !costCoverage && !items.length) {
+    host.innerHTML = "";
+    renderAdsSummaryPanel();
+    return;
+  }
+  const hasProductionCoverage = Boolean(coverage || costCoverage);
+  if (!hasProductionCoverage) {
+    host.innerHTML = `<span class="coverage-chip missing">⚠ 尚无生产真相数据，利润仍为代理估算。可继续点「导入经营数据」上传平台导出。</span>`;
   } else {
     host.innerHTML = items.join("");
+  }
+  if (!hasProductionCoverage && items.length) {
+    host.innerHTML = `${items.join("")}<span class="coverage-chip missing">⚠ 尚无生产真相数据，利润仍为代理估算。可继续点「导入经营数据」上传平台导出。</span>`;
   }
 
   // 渲染投流摘要面板(CPC/ROAS/趋势)
@@ -375,26 +454,20 @@ async function _handleDecisionCoreIntentAsync(text) {
     // 尝试从当前 StoreState 自动提取利润诊断数据
     const storeState = state.dashboard?.store_state || state.runtimeWorkspace?.store_state;
     const profit = storeState?.profit;
-    if (profit && profit.contribution_profit != null) {
+    const input = buildProfitDiagnosisInput(profit);
+    if (profit && profit.contribution_profit != null && input.current && input.baseline) {
       appendChatMessage("assistant", "我用当前利润数据做归因分析…");
       const result = await diagnoseProfit(
-        {
-          gmv: profit.gross_gmv,
-          commission: profit.platform_commission,
-          merchant_subsidy: profit.merchant_subsidy,
-          ads: profit.ads_spend,
-          food_cost: profit.food_cost,
-          packaging_cost: profit.packaging_cost,
-        },
-        {
-          gmv: profit.gross_gmv ? profit.gross_gmv * 1.1 : null,  // 近似基线
-        },
-        undefined,
-        undefined,
+        input.current,
+        input.baseline,
+        input.ordersCurrent,
+        input.ordersBaseline,
       );
       if (result && result.conclusion) {
         appendChatMessage("assistant", result.conclusion);
       }
+    } else if (profit && profit.contribution_profit != null) {
+      appendChatMessage("assistant", "当前只有单期利润数据，我先不伪造对比基线。补齐上一期经营数据后，我再做归因分析。");
     } else {
       appendChatMessage("assistant", "利润诊断需要两期对比数据。导入经营数据后,我能自动做归因分析。");
     }

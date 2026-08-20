@@ -1200,6 +1200,7 @@ async function askStoreManager(question, options = {}) {
   const homeSend = qs("#homeChatSendBtn");
   const displayQuestion = trimmed || `请先看我上传的 ${attachments.length} 个文件`;
   const parsedGoal = !attachments.length ? tryParseGoal(trimmed) : null;
+  let handledByDecisionShortcut = false;
 
   if (stayOnHome) openHomeChatMode();
   appendChatMessage("user", displayQuestion, {
@@ -1260,7 +1261,20 @@ async function askStoreManager(question, options = {}) {
     // Decision Core 前端意图拦截:活动测算 / 利润诊断
     if (!attachments.length && typeof handleDecisionCoreIntent === "function") {
       const handled = await handleDecisionCoreIntent(trimmed);
-      if (handled) return;
+      if (handled) {
+        handledByDecisionShortcut = true;
+        state.pendingWorkThreadId = null;
+        if (stayOnHome) {
+          await loadHomeWorkspace(state.currentStoreId).catch(() => null);
+          renderWorkRail();
+          renderContextRail();
+          renderDecisionHost(currentNeedCard());
+          if (!document.body.classList.contains("interviewing")) {
+            renderHomeChatThread();
+          }
+        }
+        return;
+      }
     }
 
     let response = null;
@@ -1443,7 +1457,7 @@ async function askStoreManager(question, options = {}) {
     }
     notifyError(error.message);
   } finally {
-    if (!state.runtimeWorkspace?.center?.active_thread_id) {
+    if (!handledByDecisionShortcut && !state.runtimeWorkspace?.center?.active_thread_id) {
       state.pendingWorkThreadId = workThreadId || state.pendingWorkThreadId || null;
     }
     if (attachments.length) clearHomeAttachments();

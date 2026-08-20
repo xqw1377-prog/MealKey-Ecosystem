@@ -11,9 +11,9 @@
     <!-- 视觉主轨：mk-home-v2 最后加载，覆盖旧舱样式；app/mk-home 仅作模块页底盘 -->
     <!-- CSS: app.css=基础布局, mk-home.css=经营首页V1(171个独有选择器), mk-home-v2.css=设计稿对齐覆盖层 -->
     <!-- 注意: v1 不能直接删除,v2 未覆盖全部 v1 选择器;合并需引入构建工具(P1) -->
-    <link rel="stylesheet" href="/static/app.css?v=20260818a" />
+    <link rel="stylesheet" href="/static/app.css?v=20260820c" />
     <link rel="stylesheet" href="/static/mk-home.css?v=20260818a" />
-    <link rel="stylesheet" href="/static/mk-home-v2.css?v=20260818a" />
+    <link rel="stylesheet" href="/static/mk-home-v2.css?v=20260820f" />
   </head>
   <body class="view-home">
     <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
@@ -178,6 +178,7 @@
                   <div class="mk-guide-progress" id="mkGuideProgress" hidden></div>
                   <div class="mk-guide-body" id="mkDecisionHost"></div>
                 </div>
+                <section class="mk-test-data-banner" id="mkTestDataBanner" hidden></section>
                 <div class="mk-chat-thread" id="homeChatThread" aria-live="polite"></div>
                 <!-- AI 任务专属视图：只显示当前这一件事的流程，不加载全量看板 -->
                 <div class="mk-task-view" id="mkTaskView" hidden>
@@ -1220,11 +1221,11 @@
     <script src="/static/js/01-utils.js?v=20260818b" defer></script>
     <script src="/static/js/02-api.js?v=20260818b" defer></script>
     <script src="/static/js/03-nav.js?v=20260818b" defer></script>
-    <script src="/static/js/04-home.js?v=20260818b" defer></script>
+    <script src="/static/js/04-home.js?v=20260820b" defer></script>
     <script src="/static/js/05-dashboard.js?v=20260818b" defer></script>
     <script src="/static/js/06-actions.js?v=20260818b" defer></script>
     <script src="/static/js/07-events.js?v=20260818b" defer></script>
-    <script src="/static/js/09-decision.js?v=20260818b" defer></script>
+    <script src="/static/js/09-decision.js?v=20260820b" defer></script>
     <script src="/static/js/08-init.js?v=20260818b" defer></script>
   </body>
 </html>

@@ -271,6 +271,8 @@ function renderHomeShell() {
   const homePanels = [
     ["storeSelector", renderStoreSelector],
     ["topbar", renderTopbar],
+    ["testDataBanner", renderTestDataBanner],
+    ["commandBarEscape", renderCommandBarEscapeHatches],
     ["opsQueue", renderOpsQueue],
     ["storeProfileCard", typeof renderStoreProfileCard === "function" ? renderStoreProfileCard : null],
     ["ownerProfile", () => applyOwnerProfileUI(state.ownerProfile || state.settingsOverview?.owner)],
@@ -1620,6 +1622,84 @@ function syncCommandBarForFocus(card) {
 function platformConnected() {
   const links = state.platformLinks || [];
   return links.some((link) => link.status === "connected" || link.connected_at);
+}
+
+function dailyReportTestLinks() {
+  return (state.platformLinks || []).filter(
+    (link) => link.connector_mode === "daily_report_test" && link.test_preview,
+  );
+}
+
+function hasOperationalStoreContext() {
+  if (!state.currentStoreId) return false;
+  if (dailyReportTestLinks().length) return true;
+  if (platformConnected()) return true;
+  return Boolean(state.dashboard?.store?.name || state.managerBrief?.store_name);
+}
+
+function renderCommandBarEscapeHatches() {
+  const settingsBtn = qs("#mkExpertModeBtn");
+  const intakeBtn = qs("#mkIntakeBtn");
+  const importBtn = qs("#commandBarImportBtn");
+  const hasContext = hasOperationalStoreContext();
+  if (settingsBtn) {
+    settingsBtn.hidden = hasContext;
+  }
+  if (intakeBtn) {
+    intakeBtn.hidden = hasContext;
+  }
+  if (importBtn) {
+    importBtn.hidden = false;
+  }
+}
+
+function renderTestDataBanner() {
+  const host = qs("#mkTestDataBanner");
+  if (!host) return;
+  const links = dailyReportTestLinks();
+  if (!links.length) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  const sorted = [...links].sort((a, b) => {
+    const left = String(a?.test_preview?.latest_record_date || "");
+    const right = String(b?.test_preview?.latest_record_date || "");
+    return right.localeCompare(left);
+  });
+  const lead = sorted[0] || {};
+  const preview = lead.test_preview || {};
+  const latest = preview.latest_record || {};
+  const chips = [
+    latest.exposure != null ? `曝光 ${latest.exposure}` : null,
+    latest.entry_rate != null ? `进店率 ${latest.entry_rate}%` : null,
+    latest.order_rate != null ? `下单率 ${latest.order_rate}%` : null,
+    latest.store_rating != null ? `评分 ${latest.store_rating}` : null,
+  ].filter(Boolean);
+  const platforms = sorted.map((link) => String(link.platform || "--")).join(" / ");
+  const latestDate = preview.latest_record_date || latest.record_date || "--";
+  const totalRows = sorted.reduce((sum, link) => sum + Number(link?.test_preview?.record_count || 0), 0);
+  host.hidden = false;
+  host.innerHTML = `
+    <div class="mk-test-data-banner__head">
+      <div>
+        <strong>测试源已接入</strong>
+        <span>${escapeHtml(preview.remote_store_name || latest.store_name || "当前门店")} · ${escapeHtml(platforms)}</span>
+      </div>
+      <em>${escapeHtml(String(preview.provenance || "TEST_ONLY"))}</em>
+    </div>
+    <p class="mk-test-data-banner__copy">
+      最近记录 ${escapeHtml(String(latestDate))}，累计 ${escapeHtml(String(totalRows))} 条。
+      这批数据已落到本地门店用于联调预览，但还没有进入首页经营真相。
+    </p>
+    <div class="mk-test-data-banner__chips">
+      ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("") || "<span>当前只有原始测试记录</span>"}
+    </div>
+    <div class="mk-test-data-banner__meta">
+      <span>远端门店 ID：<code>${escapeHtml(String(preview.remote_store_id || lead.external_store_id || "--"))}</code></span>
+      <span>写回：${escapeHtml(String(preview.writeback || "disabled"))}</span>
+    </div>
+  `;
 }
 
 function renderGuideProgressLine(steps) {

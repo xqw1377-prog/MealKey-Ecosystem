@@ -272,8 +272,11 @@ async function pollStoreNotifications(storeId) {
 }
 
 async function loadHomeWorkspace(storeId) {
+  const switchingStore = isStoreSwitch(storeId);
+  if (switchingStore) resetStoreScopedUiState();
   state.currentStoreId = storeId;
   persistStoreId(storeId);
+  const previousDashboard = switchingStore ? null : state.dashboard;
   const [runtimeWorkspace, settingsOverview, understanding, platformLinks, commercialBoard] = await Promise.all([
     fetchRuntimeWorkspace(storeId),
     fetchJson(`/settings/overview?store_id=${encodeURIComponent(storeId)}`).catch(
@@ -296,17 +299,17 @@ async function loadHomeWorkspace(storeId) {
     state.managerBrief = runtimeWorkspace.brief;
   }
   state.dashboard = {
-    ...(state.dashboard || {}),
+    ...(previousDashboard || {}),
     store:
       settingsOverview?.store ||
-      state.dashboard?.store ||
+      previousDashboard?.store ||
       { id: storeId, name: "门店" },
-    experiments: state.dashboard?.experiments || [],
-    question_examples: state.dashboard?.question_examples || [],
+    experiments: previousDashboard?.experiments || [],
+    question_examples: previousDashboard?.question_examples || [],
     // brief 已就位时同步 store_state 关键字段，避免 stub 回退显示 "--"
     store_state: state.managerBrief
-      ? state.dashboard?.store_state || { kpis: {}, profit: state.managerBrief.profit_summary }
-      : state.dashboard?.store_state,
+      ? previousDashboard?.store_state || { kpis: {}, profit: state.managerBrief.profit_summary }
+      : previousDashboard?.store_state || null,
   };
   await pollStoreNotifications(storeId);
   renderHomeShell();
@@ -512,6 +515,7 @@ async function submitIntakeForm(event) {
 }
 
 async function loadDashboard(storeId, { forceFull = false } = {}) {
+  if (isStoreSwitch(storeId)) resetStoreScopedUiState();
   state.currentStoreId = storeId;
   persistStoreId(storeId);
   const stayHome =

@@ -75,6 +75,50 @@ function persistStoreId(storeId) {
   }
 }
 
+function isStoreSwitch(nextStoreId) {
+  const next = String(nextStoreId || "").trim();
+  const current = String(state.currentStoreId || "").trim();
+  return Boolean(next && current && next !== current);
+}
+
+function resetStoreScopedUiState() {
+  if (typeof stopConnectCodePolling === "function") stopConnectCodePolling();
+  if (typeof clearHomeAttachments === "function") clearHomeAttachments();
+  state.dashboard = null;
+  state.runtimeWorkspace = null;
+  state.dailyPlan = null;
+  state.managerBrief = null;
+  state.operatingEvents = null;
+  state.strategyMemory = null;
+  state.competitionMap = null;
+  state.collectionRuns = [];
+  state.platformIntel = { items: [], last_run: null, sources: [] };
+  state.platformLinks = [];
+  state.settingsOverview = null;
+  state.storefrontAiPlan = null;
+  state.pendingPlatform = null;
+  state.pendingPlatformKey = null;
+  state.activeConnectCode = null;
+  state.connectPollInFlight = false;
+  state.pendingHomeAttachments = [];
+  state.chatMessages = [];
+  state.focusOverrideCard = null;
+  state.focusedWorkKey = null;
+  state.focusedWorkSlot = null;
+  state.pendingWorkThreadId = null;
+  state.understanding = null;
+  state.menuDeepDiagnosis = null;
+  state.ownerProfile = null;
+  state.enterpriseSettings = null;
+  state.pendingAvatarDataUrl = null;
+  state.commercialBoard = null;
+  state.actionTraces = [];
+  state.promoPoster = null;
+  state._lastNotifId = null;
+  state._fullDashboardLoaded = false;
+  if (typeof renderChatMessages === "function") renderChatMessages();
+}
+
 function normalizeStoreFingerprintPart(value) {
   return String(value || "").trim().toLowerCase();
 }

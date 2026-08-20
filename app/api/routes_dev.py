@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from html import escape
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,6 +23,10 @@ from app.models.entities import (
     ShopFunnelDaily,
     Store,
     StoreCompetitorWatch,
+)
+from app.services.daily_report_test_import import (
+    import_daily_report_test_records,
+    list_daily_report_test_stores,
 )
 
 router = APIRouter()
@@ -229,6 +235,92 @@ def seed_demo(db: Session = Depends(get_db)):
 
     db.commit()
     return {"merchant_id": merchant.id, "store_id": store.id, "item_id": item.id}
+
+
+def _render_daily_report_test_view(stores: list[dict]) -> str:
+    rows: list[str] = []
+    for store in stores:
+        connections_html = "".join(
+            f"""
+            <li>
+              <strong>{escape(str(conn.get("platform") or "--"))}</strong>
+              <span>{escape(str(conn.get("latest_record_date") or "--"))}</span>
+              <span>{int(conn.get("record_count") or 0)} 条</span>
+              <pre>{escape(str(conn.get("latest_record") or {}))}</pre>
+            </li>
+            """
+            for conn in store.get("connections") or []
+        )
+        rows.append(
+            f"""
+            <section class="store-card">
+              <h2>{escape(str(store.get("store_name") or "--"))}</h2>
+              <p>本地 store_id：<code>{escape(str(store.get("store_id") or "--"))}</code></p>
+              <p>远端 store_id：<code>{escape(str(store.get("remote_store_id") or "--"))}</code></p>
+              <p>最近日期：{escape(str(store.get("latest_record_date") or "--"))}，累计 {int(store.get("record_count") or 0)} 条</p>
+              <ul>{connections_html or "<li>暂无连接</li>"}</ul>
+            </section>
+            """
+        )
+    body = "".join(rows) or "<p>还没有导入任何测试日报门店。</p>"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>日报测试源调试页</title>
+    <style>
+      body {{ font-family: Arial, sans-serif; margin: 24px; background: #0f172a; color: #e2e8f0; }}
+      a {{ color: #93c5fd; }}
+      code, pre {{ background: #111827; color: #e5e7eb; border-radius: 6px; padding: 4px 6px; }}
+      pre {{ white-space: pre-wrap; word-break: break-word; padding: 12px; }}
+      .store-card {{ border: 1px solid #334155; border-radius: 12px; padding: 16px; margin: 12px 0; background: #111827; }}
+      ul {{ padding-left: 20px; }}
+      li {{ margin: 12px 0; }}
+      .hint {{ color: #94a3b8; }}
+    </style>
+  </head>
+  <body>
+    <h1>日报测试源调试页</h1>
+    <p class="hint">这里只展示落到本地的 TEST_ONLY 门店与原始预览记录，不写入首页经营真相。</p>
+    <p>JSON 接口：<a href="/dev/daily-report-test/stores">/dev/daily-report-test/stores</a></p>
+    {body}
+  </body>
+</html>
+"""
+
+
+@router.post("/daily-report-test/import")
+def import_daily_report_test(
+    page_size: int = Query(default=100, ge=1, le=500),
+    page: int = Query(default=1, ge=1),
+    remote_store_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """DEV only: 把测试日报记录落成本地调试门店，但不写生产漏斗。"""
+    if not settings.is_dev:
+        raise HTTPException(status_code=403, detail="daily-report-test import is only available in development")
+    result = import_daily_report_test_records(
+        db,
+        page_size=page_size,
+        page=page,
+        remote_store_id=(remote_store_id or None),
+    )
+    db.commit()
+    return result
+
+
+@router.get("/daily-report-test/stores")
+def get_daily_report_test_stores(db: Session = Depends(get_db)):
+    if not settings.is_dev:
+        raise HTTPException(status_code=403, detail="daily-report-test view is only available in development")
+    return {"stores": list_daily_report_test_stores(db)}
+
+
+@router.get("/daily-report-test/view", response_class=HTMLResponse)
+def view_daily_report_test_stores(db: Session = Depends(get_db)):
+    if not settings.is_dev:
+        raise HTTPException(status_code=403, detail="daily-report-test view is only available in development")
+    return HTMLResponse(_render_daily_report_test_view(list_daily_report_test_stores(db)))
 
 
 @router.post("/open-test-access")

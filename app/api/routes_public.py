@@ -24,6 +24,7 @@ def public_health():
             "depends_on_main_repo": False,
         },
         "app_env": settings.app_env,
+        "deployment_tier": settings.deployment_tier or settings.app_env,
     }
 
 
@@ -56,6 +57,7 @@ def public_config():
     amap_security = amap_security_raw if settings.is_dev else ""
     return {
         "app_env": settings.app_env,
+        "deployment_tier": settings.deployment_tier or settings.app_env,
         "brand": {
             "name_en": "MealKey",
             "name_zh": "餐启",

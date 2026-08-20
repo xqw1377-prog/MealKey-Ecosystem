@@ -398,6 +398,36 @@ function renderStoreSelector() {
   }
 }
 
+function renderDeploymentTierBanner() {
+  const config = state.publicConfig || {};
+  const rawTier = String(config.deployment_tier || config.app_env || "").trim().toLowerCase();
+  const tier = rawTier || "dev";
+  const copyMap = {
+    seed: "SEED ENVIRONMENT · TEST DATA",
+    preprod: "PRE-PRODUCTION",
+    staging: "PRE-PRODUCTION",
+    prod: "PRODUCTION",
+    production: "PRODUCTION",
+    dev: "DEV MODE",
+    development: "DEV MODE",
+    test: "TEST MODE",
+  };
+  const label = copyMap[tier];
+  ["#topbarEnvBanner", "#appbarEnvBanner"].forEach((selector) => {
+    const el = qs(selector);
+    if (!el) return;
+    if (!label) {
+      el.hidden = true;
+      el.textContent = "";
+      el.removeAttribute("data-tier");
+      return;
+    }
+    el.hidden = false;
+    el.dataset.tier = tier;
+    el.textContent = label;
+  });
+}
+
 function renderTopbar() {
   const dashboard = state.dashboard;
   const brief = state.managerBrief;
@@ -415,6 +445,7 @@ function renderTopbar() {
   const topbarEyebrow = qs("#topbarEyebrow");
   const topbarTitle = qs("#topbarTitle");
   const topbarSummary = qs("#topbarSummary");
+  renderDeploymentTierBanner();
 
   if (greetingText) greetingText.textContent = hello;
   if (onHome) {

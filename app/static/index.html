@@ -13,7 +13,7 @@
     <!-- 注意: v1 不能直接删除,v2 未覆盖全部 v1 选择器;合并需引入构建工具(P1) -->
     <link rel="stylesheet" href="/static/app.css?v=20260820c" />
     <link rel="stylesheet" href="/static/mk-home.css?v=20260818a" />
-    <link rel="stylesheet" href="/static/mk-home-v2.css?v=20260820f" />
+    <link rel="stylesheet" href="/static/mk-home-v2.css?v=20260820g" />
   </head>
   <body class="view-home">
     <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="true"></div>
@@ -119,6 +119,7 @@
         <header class="topbar module-topbar">
           <div class="topbar-main">
             <div class="topbar-eyebrow" id="topbarEyebrow">MealKey</div>
+            <div class="deployment-badge" id="topbarEnvBanner" hidden></div>
             <h1 id="topbarTitle">当下经营状态</h1>
             <p id="topbarSummary">AI 先看完经营状态，你只处理需要拍板的那件事</p>
           </div>
@@ -148,6 +149,7 @@
                 <strong id="focusStoreName">门店加载中</strong>
                 <span class="mk-open-dot" id="focusOpenDot">营业中</span>
                 <em id="sectionRefreshMeta">更新于 --</em>
+                <span class="deployment-badge deployment-badge-inline" id="appbarEnvBanner" hidden></span>
               </div>
               <div class="mk-appbar-actions">
                 <button class="mk-icon-btn" id="mkNotifyBtn" type="button" aria-label="提醒" title="提醒">
@@ -1221,11 +1223,11 @@
     <script src="/static/js/01-utils.js?v=20260818b" defer></script>
     <script src="/static/js/02-api.js?v=20260818b" defer></script>
     <script src="/static/js/03-nav.js?v=20260818b" defer></script>
-    <script src="/static/js/04-home.js?v=20260820b" defer></script>
+    <script src="/static/js/04-home.js?v=20260820c" defer></script>
     <script src="/static/js/05-dashboard.js?v=20260818b" defer></script>
     <script src="/static/js/06-actions.js?v=20260818b" defer></script>
     <script src="/static/js/07-events.js?v=20260818b" defer></script>
     <script src="/static/js/09-decision.js?v=20260820b" defer></script>
-    <script src="/static/js/08-init.js?v=20260818b" defer></script>
+    <script src="/static/js/08-init.js?v=20260820a" defer></script>
   </body>
 </html>

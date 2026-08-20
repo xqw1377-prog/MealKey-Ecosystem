@@ -530,6 +530,38 @@ textarea:focus-visible {
   letter-spacing: 0;
 }
 
+.deployment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(191, 108, 43, 0.24);
+  background: rgba(191, 108, 43, 0.1);
+  color: #8d4e17;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deployment-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.9;
+}
+
+.deployment-badge[data-tier="prod"] {
+  border-color: rgba(47, 107, 79, 0.24);
+  background: rgba(47, 107, 79, 0.1);
+  color: #2f6b4f;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;

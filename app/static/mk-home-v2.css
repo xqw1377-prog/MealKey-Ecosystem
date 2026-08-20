@@ -85,6 +85,11 @@ body.view-home .mk-appbar-store .mk-open-dot {
   background: rgba(47, 107, 79, 0.08);
 }
 
+body.view-home .mk-appbar-store .deployment-badge-inline {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 body.view-home .mk-appbar-store .mk-meta-sep {
   display: none;
 }
@@ -1972,6 +1977,12 @@ body.view-home .mk-sheet-backdrop {
 
   body.view-home .mk-appbar-store em {
     display: none;
+  }
+
+  body.view-home .mk-appbar-store .deployment-badge-inline {
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
   }
 
   body.view-home .mk-owner-name,

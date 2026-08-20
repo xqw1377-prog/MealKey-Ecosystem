@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "dev"
+    deployment_tier: str = ""
     database_url: str = "sqlite:///./mealky.db"
     run_schema_sync_on_startup: bool = False
     run_alembic_on_startup: bool = False

@@ -82,6 +82,7 @@ async function init() {
   renderChatMessages();
   if (typeof applyOwnerProfileUI === "function") applyOwnerProfileUI({});
   state.publicConfig = await fetchJson("/public/config").catch(() => null);
+  if (typeof renderDeploymentTierBanner === "function") renderDeploymentTierBanner();
   await ensureWorkspaceAuth();
   try {
     await loadStores();
